@@ -9,12 +9,12 @@ import Foundation
 /// - assembled: the service extension successfully prepared content
 ///
 private enum ServiceExtensionEvents: String {
-    case launched   = "wpios_notification_service_extension_launched"
-    case discarded  = "wpios_notification_service_extension_discarded"
-    case failed     = "wpios_notification_service_extension_failed"
-    case assembled  = "wpios_notification_service_extension_assembled"
-    case malformed  = "wpios_notification_service_extension_malformed_payload"
-    case timedOut   = "wpios_notification_service_extension_timed_out"
+    case launched   = "notification_service_extension_launched"
+    case discarded  = "notification_service_extension_discarded"
+    case failed     = "notification_service_extension_failed"
+    case assembled  = "notification_service_extension_assembled"
+    case malformed  = "notification_service_extension_malformed_payload"
+    case timedOut   = "notification_service_extension_timed_out"
 }
 
 // MARK: - Supports tracking notification service extension events.
@@ -60,7 +60,12 @@ extension Tracks {
     }
 
     /// Tracks the unsuccessful unwrapping of push notification payload data.
-    func trackNotificationMalformed(properties: [String: AnyObject]? = nil) {
+    func trackNotificationMalformed(hasToken: Bool, notificationBody: String) {
+        let properties: [String: AnyObject] = [
+            "have_token": hasToken as AnyObject,
+            "content": notificationBody as AnyObject
+        ]
+
         trackEvent(ServiceExtensionEvents.malformed, properties: properties)
     }
 

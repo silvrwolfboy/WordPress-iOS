@@ -2,7 +2,7 @@
 #import <WordPressShared/WPFontManager.h>
 #import "WordPress-Swift.h"
 
-NSInteger const SuggestionsTableViewCellAvatarSize = 23;
+NSInteger const SuggestionsTableViewCellIconSize = 24;
 
 @implementation SuggestionsTableViewCell
 
@@ -10,61 +10,66 @@ NSInteger const SuggestionsTableViewCellAvatarSize = 23;
 {
     self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
     if (self) {
-        [self setupUsernameLabel];
-        [self setupDisplayNameLabel];
-        [self setupAvatarImageView];
+        [self setupTitleLabel];
+        [self setupSubtitleLabel];
+        [self setupIconImageView];
         [self setupConstraints];
+        self.backgroundColor = [UIColor murielListForeground];
     }
     return self;
 }
 
-- (void)setupUsernameLabel
-{
-    _usernameLabel = [[UILabel alloc] init];
-    [_usernameLabel setTextColor:[UIColor murielPrimary]];
-    [_usernameLabel setFont:[WPFontManager systemRegularFontOfSize:14.0]];
-    [_usernameLabel setTranslatesAutoresizingMaskIntoConstraints:NO];
-    [self.contentView addSubview:_usernameLabel];
+- (void)prepareForReuse {
+    [super prepareForReuse];
+    self.imageDownloadHash = 0;
 }
 
-- (void)setupDisplayNameLabel
+- (void)setupTitleLabel
 {
-    _displayNameLabel = [[UILabel alloc] init];
-    [_displayNameLabel setTextColor:[WPStyleGuide allTAllShadeGrey]];
-    [_displayNameLabel setFont:[WPFontManager systemRegularFontOfSize:14.0]];
-    [_displayNameLabel setTranslatesAutoresizingMaskIntoConstraints:NO];
-    _displayNameLabel.textAlignment = NSTextAlignmentRight;
-    [self.contentView addSubview:_displayNameLabel];
+    _titleLabel = [[UILabel alloc] init];
+    [_titleLabel setTextColor:[UIColor murielPrimary]];
+    [_titleLabel setFont:[WPFontManager systemRegularFontOfSize:17.0]];
+    [_titleLabel setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [self.contentView addSubview:_titleLabel];
 }
 
-- (void)setupAvatarImageView
+- (void)setupSubtitleLabel
 {
-    _avatarImageView = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, SuggestionsTableViewCellAvatarSize, SuggestionsTableViewCellAvatarSize)];
-    _avatarImageView.contentMode = UIViewContentModeScaleAspectFit;
-    _avatarImageView.clipsToBounds = YES;
-    _avatarImageView.image = [UIImage imageNamed:@"gravatar.png"];
-    [_avatarImageView setTranslatesAutoresizingMaskIntoConstraints:NO];
-    [self.contentView addSubview:_avatarImageView];
+    _subtitleLabel = [[UILabel alloc] init];
+    [_subtitleLabel setTextColor:[UIColor murielTextSubtle]];
+    [_subtitleLabel setFont:[WPFontManager systemRegularFontOfSize:14.0]];
+    [_subtitleLabel setTranslatesAutoresizingMaskIntoConstraints:NO];
+    _subtitleLabel.textAlignment = NSTextAlignmentRight;
+    [self.contentView addSubview:_subtitleLabel];
+}
+
+- (void)setupIconImageView
+{
+    _iconImageView = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, SuggestionsTableViewCellIconSize, SuggestionsTableViewCellIconSize)];
+    _iconImageView.contentMode = UIViewContentModeScaleAspectFit;
+    _iconImageView.clipsToBounds = YES;
+    [_iconImageView setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [self.contentView addSubview:_iconImageView];
 }
 
 - (void)setupConstraints
 {
     NSDictionary *views = @{@"contentview": self.contentView,
-                            @"username": _usernameLabel,
-                            @"displayname": _displayNameLabel,
-                            @"avatar": _avatarImageView };
+                            @"title": _titleLabel,
+                            @"subtitle": _subtitleLabel,
+                            @"icon": _iconImageView };
         
-    NSDictionary *metrics = @{@"avatarsize": @(SuggestionsTableViewCellAvatarSize) };
+    NSDictionary *metrics = @{@"iconsize": @(SuggestionsTableViewCellIconSize) };
         
     // Horizontal spacing
-    NSArray *horizConstraints = [NSLayoutConstraint constraintsWithVisualFormat:@"H:|-[avatar(avatarsize)]-16-[username]-[displayname]-|"
+    NSArray *horizConstraints = [NSLayoutConstraint constraintsWithVisualFormat:@"H:|-[icon(iconsize)]-16-[title]-[subtitle]-|"
                                                                         options:0
                                                                         metrics:metrics
                                                                           views:views];
     [self.contentView addConstraints:horizConstraints];
                 
     // Vertically constrain centers of each element
-    [self.contentView addConstraint:[NSLayoutConstraint constraintWithItem:_usernameLabel
+    [self.contentView addConstraint:[NSLayoutConstraint constraintWithItem:_titleLabel
                                                                  attribute:NSLayoutAttributeCenterY
                                                                  relatedBy:NSLayoutRelationEqual
                                                                     toItem:self.contentView
@@ -72,7 +77,7 @@ NSInteger const SuggestionsTableViewCellAvatarSize = 23;
                                                                 multiplier:1.0
                                                                   constant:0]];
         
-    [self.contentView addConstraint:[NSLayoutConstraint constraintWithItem:_displayNameLabel
+    [self.contentView addConstraint:[NSLayoutConstraint constraintWithItem:_subtitleLabel
                                                                  attribute:NSLayoutAttributeCenterY
                                                                  relatedBy:NSLayoutRelationEqual
                                                                     toItem:self.contentView
@@ -80,7 +85,7 @@ NSInteger const SuggestionsTableViewCellAvatarSize = 23;
                                                                 multiplier:1.0
                                                                   constant:0]];
         
-    [self.contentView addConstraint:[NSLayoutConstraint constraintWithItem:_avatarImageView
+    [self.contentView addConstraint:[NSLayoutConstraint constraintWithItem:_iconImageView
                                                                  attribute:NSLayoutAttributeCenterY
                                                                  relatedBy:NSLayoutRelationEqual
                                                                     toItem:self.contentView

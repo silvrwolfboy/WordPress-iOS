@@ -7,6 +7,8 @@
 @class ReaderCrossPostMeta;
 @class SourcePostAttribution;
 @class Comment;
+@class RemoteReaderPost;
+@class ReaderCard;
 
 extern NSString * const ReaderPostStoredCommentIDKey;
 extern NSString * const ReaderPostStoredCommentTextKey;
@@ -26,12 +28,16 @@ extern NSString * const ReaderPostStoredCommentTextKey;
 @property (nonatomic, strong) NSNumber *feedID;
 @property (nonatomic, strong) NSNumber *feedItemID;
 @property (nonatomic, strong) NSString *globalID;
+@property (nonatomic) BOOL isBlogAtomic;
 @property (nonatomic) BOOL isBlogPrivate;
 @property (nonatomic) BOOL isFollowing;
 @property (nonatomic) BOOL isLiked;
 @property (nonatomic) BOOL isReblogged;
 @property (nonatomic) BOOL isWPCom;
 @property (nonatomic) BOOL isSavedForLater;
+@property (nonatomic) BOOL isSeen;
+@property (nonatomic) BOOL isSeenSupported;
+@property (nonatomic, strong) NSNumber *organizationID;
 @property (nonatomic, strong) NSNumber *likeCount;
 @property (nonatomic, strong) NSNumber *score;
 @property (nonatomic, strong) NSNumber *siteID;
@@ -45,10 +51,14 @@ extern NSString * const ReaderPostStoredCommentTextKey;
 @property (nonatomic, readonly, strong) NSURL *featuredImageURL;
 @property (nonatomic, strong) NSString *tags;
 @property (nonatomic, strong) ReaderAbstractTopic *topic;
+@property (nonatomic, strong) NSSet<ReaderCard *> *card;
 @property (nonatomic) BOOL isLikesEnabled;
 @property (nonatomic) BOOL isSharingEnabled;
 @property (nonatomic) BOOL isSiteBlocked;
 @property (nonatomic, strong) SourcePostAttribution *sourceAttribution;
+@property (nonatomic) BOOL isSubscribedComments;
+@property (nonatomic) BOOL canSubscribeComments;
+@property (nonatomic) BOOL receivesCommentNotifications;
 
 @property (nonatomic, strong) NSString *primaryTag;
 @property (nonatomic, strong) NSString *primaryTagSlug;
@@ -65,8 +75,11 @@ extern NSString * const ReaderPostStoredCommentTextKey;
 // When true indicates a post should not be deleted/cleaned-up as its currently being used.
 @property (nonatomic) BOOL inUse;
 
++ (instancetype)createOrReplaceFromRemotePost:(RemoteReaderPost *)remotePost forTopic:(ReaderAbstractTopic *)topic context:(NSManagedObjectContext *) managedObjectContext;
+
 - (BOOL)isCrossPost;
 - (BOOL)isPrivate;
+- (BOOL)isP2Type;
 - (NSString *)authorString;
 - (NSString *)avatar;
 - (UIImage *)cachedAvatarWithSize:(CGSize)size;

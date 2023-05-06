@@ -5,7 +5,7 @@ extension String {
         return NSLocalizedString("Free Photo Library", comment: "One of the options when selecting More in the Post Editor's format bar")
     }
 
-    static var files: String {
+    static var otherApps: String {
         return NSLocalizedString("Other Apps", comment: "Menu option used for adding media from other applications.")
     }
 
@@ -14,7 +14,11 @@ extension String {
     }
 
     static var cancelMoreOptions: String {
-        return NSLocalizedString("Dismiss", comment: "Dismiss the AlertView")
+        return NSLocalizedString(
+            "stockPhotos.strings.dismiss",
+            value: "Dismiss",
+            comment: "Dismiss the AlertView"
+        )
     }
 
     // MARK: - Placeholder

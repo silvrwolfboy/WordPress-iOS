@@ -10,15 +10,15 @@ class ChangeUsernameViewModel {
     var username: String {
         return settings?.username ?? ""
     }
+
     var displayName: String {
         return settings?.displayName ?? ""
     }
-    var formattedCreatedDate: String? {
-        return accountService.defaultWordPressComAccount()?.dateCreated.mediumString()
-    }
+
     var isReachable: Bool {
         return reachability?.isReachable() ?? false
     }
+
     var usernameIsValidToBeChanged: Bool {
         return selectedUsername != username && !selectedUsername.isEmpty
     }
@@ -38,7 +38,6 @@ class ChangeUsernameViewModel {
     private let settings: AccountSettings?
     private let store: AccountSettingsStore
     private let reachability = Reachability.forInternetConnection()
-    private let accountService = AccountService(managedObjectContext: ContextManager.sharedInstance().mainContext)
     private var receipt: Receipt?
     private var saveUsernameBlock: StateBlock?
     private var reloadAllSections: Bool = true

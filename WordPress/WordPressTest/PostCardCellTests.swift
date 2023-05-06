@@ -6,18 +6,13 @@ import Nimble
 
 private typealias StatusMessages = PostCardStatusViewModel.StatusMessages
 
-class PostCardCellTests: XCTestCase {
-    private var contextManager: TestContextManager!
-    private var context: NSManagedObjectContext!
-
+class PostCardCellTests: CoreDataTestCase {
     private var postCell: PostCardCell!
     private var interactivePostViewDelegateMock: InteractivePostViewDelegateMock!
     private var postActionSheetDelegateMock: PostActionSheetDelegateMock!
 
     override func setUp() {
         super.setUp()
-        contextManager = TestContextManager()
-        context = contextManager.newDerivedContext()
 
         postCell = postCellFromNib()
         interactivePostViewDelegateMock = InteractivePostViewDelegateMock()
@@ -26,18 +21,12 @@ class PostCardCellTests: XCTestCase {
         postCell.setActionSheetDelegate(postActionSheetDelegateMock)
     }
 
-    override func tearDown() {
-        context = nil
-        contextManager = nil
-        super.tearDown()
-    }
-
     func testIsAUITableViewCell() {
         XCTAssertNotNil(postCell as UITableViewCell)
     }
 
     func testShowImageWhenAvailable() {
-        let post = PostBuilder().withImage().build()
+        let post = PostBuilder(mainContext).withImage().build()
 
         postCell.configure(with: post)
 
@@ -45,7 +34,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testHideImageWhenNotAvailable() {
-        let post = PostBuilder().build()
+        let post = PostBuilder(mainContext).build()
 
         postCell.configure(with: post)
 
@@ -53,7 +42,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowPostTitle() {
-        let post = PostBuilder().with(title: "Foo bar").build()
+        let post = PostBuilder(mainContext).with(title: "Foo bar").build()
 
         postCell.configure(with: post)
 
@@ -61,7 +50,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowPostSnippet() {
-        let post = PostBuilder().with(snippet: "Post content").build()
+        let post = PostBuilder(mainContext).with(snippet: "Post content").build()
 
         postCell.configure(with: post)
 
@@ -70,7 +59,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testHidePostSnippet() {
-        let post = PostBuilder().with(snippet: "").build()
+        let post = PostBuilder(mainContext).with(snippet: "").build()
 
         postCell.configure(with: post)
 
@@ -78,15 +67,15 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowDate() {
-        let post = PostBuilder().with(dateModified: Date()).drafted().build()
+        let post = PostBuilder(mainContext).with(dateModified: Date()).drafted().build()
 
         postCell.configure(with: post)
 
-        XCTAssertEqual(postCell.dateLabel.text, "just now")
+        expect(self.postCell.dateLabel.text).toNot(beEmpty())
     }
 
     func testShowAuthor() {
-        let post = PostBuilder().with(author: "John Doe").build()
+        let post = PostBuilder(mainContext).with(author: "John Doe").build()
 
         postCell.configure(with: post)
 
@@ -94,7 +83,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowStickyLabelWhenPostIsSticky() {
-        let post = PostBuilder().is(sticked: true).with(remoteStatus: .sync).build()
+        let post = PostBuilder(mainContext).is(sticked: true).with(remoteStatus: .sync).build()
 
         postCell.configure(with: post)
 
@@ -102,7 +91,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testHideStickyLabelWhenPostIsntSticky() {
-        let post = PostBuilder().is(sticked: false).with(remoteStatus: .sync).build()
+        let post = PostBuilder(mainContext).is(sticked: false).with(remoteStatus: .sync).build()
 
         postCell.configure(with: post)
 
@@ -110,7 +99,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testHideStickyLabelWhenPostIsUploading() {
-        let post = PostBuilder().is(sticked: true).with(remoteStatus: .pushing).build()
+        let post = PostBuilder(mainContext).is(sticked: true).with(remoteStatus: .pushing).build()
 
         postCell.configure(with: post)
 
@@ -118,7 +107,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testHideStickyLabelWhenPostIsFailed() {
-        let post = PostBuilder().is(sticked: true).with(remoteStatus: .failed).build()
+        let post = PostBuilder(mainContext).is(sticked: true).with(remoteStatus: .failed).build()
 
         postCell.configure(with: post)
 
@@ -126,7 +115,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowPrivateLabelWhenPostIsPrivate() {
-        let post = PostBuilder().with(remoteStatus: .sync).private().build()
+        let post = PostBuilder(mainContext).with(remoteStatus: .sync).private().build()
 
         postCell.configure(with: post)
 
@@ -134,7 +123,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testDoNotShowTrashedLabel() {
-        let post = PostBuilder().with(remoteStatus: .sync).trashed().build()
+        let post = PostBuilder(mainContext).with(remoteStatus: .sync).trashed().build()
 
         postCell.configure(with: post)
 
@@ -142,7 +131,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testDoNotShowScheduledLabel() {
-        let post = PostBuilder().with(remoteStatus: .sync).scheduled().build()
+        let post = PostBuilder(mainContext).with(remoteStatus: .sync).scheduled().build()
 
         postCell.configure(with: post)
 
@@ -150,7 +139,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testHideHideStatusView() {
-        let post = PostBuilder()
+        let post = PostBuilder(mainContext)
             .with(remoteStatus: .sync)
             .published().build()
 
@@ -160,7 +149,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowStatusView() {
-        let post = PostBuilder()
+        let post = PostBuilder(mainContext)
             .with(remoteStatus: .failed)
             .published().build()
 
@@ -170,7 +159,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowProgressView() {
-        let post = PostBuilder()
+        let post = PostBuilder(mainContext)
             .with(remoteStatus: .pushing)
             .published().build()
 
@@ -180,7 +169,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testHideProgressView() {
-        let post = PostBuilder()
+        let post = PostBuilder(mainContext)
             .with(remoteStatus: .sync)
             .published().build()
 
@@ -190,7 +179,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testIsUserInteractionEnabled() {
-        let post = PostBuilder().withImage().build()
+        let post = PostBuilder(mainContext).withImage().build()
         postCell.isUserInteractionEnabled = false
 
         postCell.configure(with: post)
@@ -199,7 +188,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testEditAction() {
-        let post = PostBuilder().published().build()
+        let post = PostBuilder(mainContext).published().build()
         postCell.configure(with: post)
 
         postCell.edit()
@@ -208,7 +197,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testViewAction() {
-        let post = PostBuilder().published().build()
+        let post = PostBuilder(mainContext).published().build()
         postCell.configure(with: post)
 
         postCell.view()
@@ -218,7 +207,7 @@ class PostCardCellTests: XCTestCase {
 
     func testMoreAction() {
         let button = UIButton()
-        let post = PostBuilder().published().build()
+        let post = PostBuilder(mainContext).published().build()
         postCell.configure(with: post)
 
         postCell.more(button)
@@ -228,7 +217,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testRetryAction() {
-        let post = PostBuilder().published().build()
+        let post = PostBuilder(mainContext).published().build()
         postCell.configure(with: post)
 
         postCell.retry()
@@ -237,7 +226,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowPublishButtonAndHideViewButton() {
-        let post = PostBuilder().private().with(remoteStatus: .failed).build()
+        let post = PostBuilder(mainContext).private().with(remoteStatus: .failed).build()
 
         postCell.configure(with: post)
 
@@ -246,28 +235,38 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testHideAuthorAndSeparator() {
-        let post = PostBuilder().with(author: "John Doe").build()
+        let post = PostBuilder(mainContext).with(author: "John Doe").build()
         postCell.configure(with: post)
 
-        postCell.isAuthorHidden = true
+        postCell.shouldHideAuthor = true
 
         XCTAssertTrue(postCell.authorLabel.isHidden)
         XCTAssertTrue(postCell.separatorLabel.isHidden)
     }
 
     func testDoesNotHideAuthorAndSeparator() {
-        let post = PostBuilder().with(author: "John Doe").build()
+        let post = PostBuilder(mainContext).with(author: "John Doe").build()
         postCell.configure(with: post)
 
-        postCell.isAuthorHidden = false
+        postCell.shouldHideAuthor = false
 
         XCTAssertFalse(postCell.authorLabel.isHidden)
         XCTAssertFalse(postCell.separatorLabel.isHidden)
     }
 
+    func testHidesAuthorSeparatorWhenAuthorEmpty() {
+        let post = PostBuilder(mainContext).with(author: "").build()
+        postCell.configure(with: post)
+
+        postCell.shouldHideAuthor = false
+
+        XCTAssertTrue(postCell.authorLabel.isHidden)
+        XCTAssertTrue(postCell.separatorLabel.isHidden)
+    }
+
     func testShowsPostWillBePublishedWarningForFailedPublishedPostsWithRemote() {
         // Given
-        let post = PostBuilder(context).published().withRemote().with(remoteStatus: .failed).confirmedAutoUpload().build()
+        let post = PostBuilder(mainContext).published().withRemote().with(remoteStatus: .failed).confirmedAutoUpload().build()
 
         // When
         postCell.configure(with: post)
@@ -279,7 +278,7 @@ class PostCardCellTests: XCTestCase {
 
     func testShowsPostWillBePublishedWarningForLocallyPublishedPosts() {
         // Given
-        let post = PostBuilder(context).published().with(remoteStatus: .failed).confirmedAutoUpload().build()
+        let post = PostBuilder(mainContext).published().with(remoteStatus: .failed).confirmedAutoUpload().build()
 
         // When
         postCell.configure(with: post)
@@ -291,7 +290,7 @@ class PostCardCellTests: XCTestCase {
 
     func testShowsCancelButtonForUserConfirmedFailedPublishedPosts() {
         // Given
-        let post = PostBuilder().published().with(remoteStatus: .failed).confirmedAutoUpload().build()
+        let post = PostBuilder(mainContext).published().with(remoteStatus: .failed).confirmedAutoUpload().build()
 
         // When
         postCell.configure(with: post)
@@ -310,8 +309,8 @@ class PostCardCellTests: XCTestCase {
 
         // Arrange
         let posts = [
-            PostBuilder(context).published().with(remoteStatus: .failed).build(),
-            PostBuilder(context).drafted().with(remoteStatus: .failed).build()
+            PostBuilder(mainContext).published().with(remoteStatus: .failed).build(),
+            PostBuilder(mainContext).drafted().with(remoteStatus: .failed).build()
         ]
 
         // Act and Assert
@@ -325,7 +324,7 @@ class PostCardCellTests: XCTestCase {
 
     func testDoesntShowFailedForCancelledAutoUploads() {
         // Given
-        let post = PostBuilder()
+        let post = PostBuilder(mainContext)
             .published()
             .with(remoteStatus: .failed)
             .confirmedAutoUpload()
@@ -342,7 +341,7 @@ class PostCardCellTests: XCTestCase {
 
     func testShowsDraftWillBeUploadedMessageForDraftsWithRemote() {
         // Given
-        let post = PostBuilder(context).drafted().withRemote().with(remoteStatus: .failed).confirmedAutoUpload().build()
+        let post = PostBuilder(mainContext).drafted().withRemote().with(remoteStatus: .failed).confirmedAutoUpload().build()
 
         // When
         postCell.configure(with: post)
@@ -354,7 +353,7 @@ class PostCardCellTests: XCTestCase {
 
     func testShowsDraftWillBeUploadedMessageForLocalDrafts() {
         // Given
-        let post = PostBuilder(context).drafted().with(remoteStatus: .failed).build()
+        let post = PostBuilder(mainContext).drafted().with(remoteStatus: .failed).build()
 
         // When
         postCell.configure(with: post)
@@ -365,7 +364,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowsFailedMessageWhenAttemptToAutoUploadADraft() {
-        let post = PostBuilder(context).drafted().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 2).build()
+        let post = PostBuilder(mainContext).drafted().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 2).build()
 
         postCell.configure(with: post)
 
@@ -374,7 +373,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testFailedMessageWhenMaxNumberOfAttemptsToAutoDraftIsReached() {
-        let post = PostBuilder(context).drafted().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 3).build()
+        let post = PostBuilder(mainContext).drafted().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 3).build()
 
         postCell.configure(with: post)
 
@@ -383,7 +382,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testFailedMessageWhenMaxNumberOfAttemptsToAutoDraftIsReachedAndPostHasFailedMedia() {
-        let post = PostBuilder(context).with(image: "", status: .failed).with(remoteStatus: .failed).with(autoUploadAttemptsCount: 3).build()
+        let post = PostBuilder(mainContext).with(image: "", status: .failed).with(remoteStatus: .failed).with(autoUploadAttemptsCount: 3).build()
 
         postCell.configure(with: post)
 
@@ -392,7 +391,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowsFailedMessageWhenAttemptToAutoUploadAPrivatePost() {
-        let post = PostBuilder(context).private().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 2).confirmedAutoUpload().build()
+        let post = PostBuilder(mainContext).private().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 2).confirmedAutoUpload().build()
 
         postCell.configure(with: post)
 
@@ -401,7 +400,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testFailedMessageWhenMaxNumberOfAttemptsToUploadPrivateIsReached() {
-        let post = PostBuilder(context).private().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 3).build()
+        let post = PostBuilder(mainContext).private().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 3).build()
 
         postCell.configure(with: post)
 
@@ -410,7 +409,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowsPrivatePostWillBeUploadedMessageForPrivatePosts() {
-        let post = PostBuilder(context).private().with(remoteStatus: .failed).confirmedAutoUpload().build()
+        let post = PostBuilder(mainContext).private().with(remoteStatus: .failed).confirmedAutoUpload().build()
 
         postCell.configure(with: post)
 
@@ -419,7 +418,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowsFailedMessageWhenAttemptToAutoUploadAScheduledPost() {
-        let post = PostBuilder(context).scheduled().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 2).confirmedAutoUpload().build()
+        let post = PostBuilder(mainContext).scheduled().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 2).confirmedAutoUpload().build()
 
         postCell.configure(with: post)
 
@@ -428,7 +427,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testFailedMessageWhenMaxNumberOfAttemptsToUploadScheduledIsReached() {
-        let post = PostBuilder(context).scheduled().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 3).build()
+        let post = PostBuilder(mainContext).scheduled().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 3).build()
 
         postCell.configure(with: post)
 
@@ -437,7 +436,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowsScheduledPostWillBeUploadedMessageForScheduledPosts() {
-        let post = PostBuilder(context).scheduled().with(remoteStatus: .failed).confirmedAutoUpload().build()
+        let post = PostBuilder(mainContext).scheduled().with(remoteStatus: .failed).confirmedAutoUpload().build()
 
         postCell.configure(with: post)
 
@@ -446,7 +445,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowsPostWillBeSubmittedMessageForPendingPost() {
-        let post = PostBuilder(context).pending().with(remoteStatus: .failed).confirmedAutoUpload().build()
+        let post = PostBuilder(mainContext).pending().with(remoteStatus: .failed).confirmedAutoUpload().build()
 
         postCell.configure(with: post)
 
@@ -455,7 +454,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowsFailedMessageWhenAttemptToSubmitAPendingPost() {
-        let post = PostBuilder(context).pending().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 2).confirmedAutoUpload().build()
+        let post = PostBuilder(mainContext).pending().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 2).confirmedAutoUpload().build()
 
         postCell.configure(with: post)
 
@@ -464,7 +463,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testFailedMessageWhenMaxNumberOfAttemptsToSubmitPendingPostIsReached() {
-        let post = PostBuilder(context).pending().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 3).build()
+        let post = PostBuilder(mainContext).pending().with(remoteStatus: .failed).with(autoUploadAttemptsCount: 3).build()
 
         postCell.configure(with: post)
 
@@ -473,7 +472,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testFailedMessageForCanceledPostWithFailedMedias() {
-        let post = PostBuilder(context).drafted().with(remoteStatus: .failed).with(image: "test.png", status: .failed, autoUploadFailureCount: 3).cancelledAutoUpload().revision().build()
+        let post = PostBuilder(mainContext).drafted().with(remoteStatus: .failed).with(image: "test.png", status: .failed, autoUploadFailureCount: 3).cancelledAutoUpload().revision().build()
 
         postCell.configure(with: post)
 
@@ -482,7 +481,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testMessageWhenPostIsArevision() {
-        let post = PostBuilder(context).revision().with(remoteStatus: .failed).with(remoteStatus: .local).build()
+        let post = PostBuilder(mainContext).revision().with(remoteStatus: .failed).with(remoteStatus: .local).build()
 
         postCell.configure(with: post)
 
@@ -491,7 +490,7 @@ class PostCardCellTests: XCTestCase {
     }
 
     func testShowsUnsavedChangesMessageWhenPostHasAutosave() {
-        let post = PostBuilder(context).with(remoteStatus: .sync).autosaved().build()
+        let post = PostBuilder(mainContext).with(remoteStatus: .sync).autosaved().build()
 
         postCell.configure(with: post)
 

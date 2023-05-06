@@ -1,7 +1,8 @@
 import Foundation
 import CocoaLumberjack
 import WordPressShared
-
+import WordPressFlux
+import UIKit
 
 class PageListViewController: AbstractPostListViewController, UIViewControllerRestoration {
     private struct Constant {
@@ -19,6 +20,11 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
             static let restorePageCellIdentifier = "RestorePageCellIdentifier"
             static let restorePageCellNibName = "RestorePageTableViewCell"
             static let currentPageListStatusFilterKey = "CurrentPageListStatusFilterKey"
+        }
+
+        struct Events {
+            static let source = "page_list"
+            static let pagePostType = "page"
         }
     }
 
@@ -45,6 +51,16 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
         }
     }
 
+    lazy var homepageSettingsService = {
+        return HomepageSettingsService(blog: blog, coreDataStack: ContextManager.shared)
+    }()
+
+    private lazy var createButtonCoordinator: CreateButtonCoordinator = {
+        let action = PageAction(handler: { [weak self] in
+            self?.createPost()
+        }, source: Constant.Events.source)
+        return CreateButtonCoordinator(self, actions: [action], source: Constant.Events.source)
+    }()
 
     // MARK: - GUI
 
@@ -63,7 +79,19 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
         controller.blog = blog
         controller.restorationClass = self
 
+        if QuickStartTourGuide.shared.isCurrentElement(.pages) {
+            controller.filterSettings.setFilterWithPostStatus(BasePost.Status.publish)
+        }
+
         return controller
+    }
+
+    static func showForBlog(_ blog: Blog, from sourceController: UIViewController) {
+        let controller = PageListViewController.controllerWithBlog(blog)
+        controller.navigationItem.largeTitleDisplayMode = .never
+        sourceController.navigationController?.pushViewController(controller, animated: true)
+
+        QuickStartTourGuide.shared.visited(.pages)
     }
 
     // MARK: - UIViewControllerRestoration
@@ -109,15 +137,17 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        if QuickStartTourGuide.find()?.isCurrentElement(.newPage) ?? false {
+        if QuickStartTourGuide.shared.isCurrentElement(.newPage) {
             updateFilterWithPostStatus(.publish)
         }
 
         super.updateAndPerformFetchRequest()
 
-        title = NSLocalizedString("Site Pages", comment: "Title of the screen showing the list of pages for a blog.")
+        title = NSLocalizedString("Pages", comment: "Title of the screen showing the list of pages for a blog.")
 
         configureFilterBarTopConstraint()
+
+        createButtonCoordinator.add(to: view, trailingAnchor: view.safeAreaLayoutGuide.trailingAnchor, bottomAnchor: view.safeAreaLayoutGuide.bottomAnchor)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -127,6 +157,27 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
         _tableViewHandler.refreshTableView()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+
+        if traitCollection.horizontalSizeClass == .compact {
+            createButtonCoordinator.showCreateButton(for: blog)
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        QuickStartTourGuide.shared.endCurrentTour()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if traitCollection.horizontalSizeClass == .compact {
+            createButtonCoordinator.showCreateButton(for: blog)
+        } else {
+            createButtonCoordinator.hideCreateButton()
+        }
+    }
 
     // MARK: - Configuration
 
@@ -156,7 +207,7 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
 
         tableView.tableHeaderView = searchController.searchBar
 
-        tableView.scrollIndicatorInsets.top = searchController.searchBar.bounds.height
+        tableView.verticalScrollIndicatorInsets.top = searchController.searchBar.bounds.height
     }
 
     override func configureAuthorFilter() {
@@ -168,6 +219,14 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
         tableView.tableFooterView = UIView(frame: .zero)
     }
 
+    fileprivate func beginRefreshingManually() {
+        guard let refreshControl = refreshControl else {
+            return
+        }
+
+        refreshControl.beginRefreshing()
+        tableView.setContentOffset(CGPoint(x: 0, y: tableView.contentOffset.y - refreshControl.frame.size.height), animated: true)
+    }
 
     // MARK: - Sync Methods
 
@@ -340,10 +399,6 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
         return Constant.Size.pageSectionHeaderHeight
     }
 
-    override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        return Constant.Size.pageCellWithTagEstimatedRowHeight
-    }
-
     func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         guard _tableViewHandler.groupResults else {
             return UIView(frame: .zero)
@@ -364,11 +419,6 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
         tableView.deselectRow(at: indexPath, animated: true)
 
         let page = pageAtIndexPath(indexPath)
-
-        guard page.status != .trash else {
-            return
-        }
-
         editPage(page)
     }
 
@@ -430,69 +480,57 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
     // MARK: - Post Actions
 
     override func createPost() {
-        let context = ContextManager.sharedInstance().mainContext
-        let postService = PostService(managedObjectContext: context)
-        let page = postService.createDraftPage(for: blog)
-        WPAppAnalytics.track(.editorCreatedPost, withProperties: ["tap_source": "posts_view"], with: blog)
-        showEditor(post: page)
+        WPAppAnalytics.track(.editorCreatedPost, withProperties: [WPAppAnalyticsKeyTapSource: Constant.Events.source, WPAppAnalyticsKeyPostType: Constant.Events.pagePostType], with: blog)
 
-        QuickStartTourGuide.find()?.visited(.newPage)
+        PageCoordinator.showLayoutPickerIfNeeded(from: self, forBlog: blog) { [weak self] (selectedLayout) in
+            self?.createPage(selectedLayout)
+        }
     }
 
-    fileprivate func editPage(_ apost: AbstractPost) {
-        guard !PostCoordinator.shared.isUploading(post: apost) else {
-            presentAlertForPageBeingUploaded()
-            return
+    private func createPage(_ starterLayout: PageTemplateLayout?) {
+        let editorViewController = EditPageViewController(blog: blog, postTitle: starterLayout?.title, content: starterLayout?.content, appliedTemplate: starterLayout?.slug)
+        present(editorViewController, animated: false)
+
+        QuickStartTourGuide.shared.visited(.newPage)
+    }
+
+    private func blazePage(_ page: AbstractPost) {
+        BlazeEventsTracker.trackEntryPointTapped(for: .pagesList)
+        BlazeFlowCoordinator.presentBlaze(in: self, source: .pagesList, blog: blog, post: page)
+    }
+
+    fileprivate func editPage(_ page: Page) {
+        let didOpenEditor = PageEditorPresenter.handle(page: page, in: self, entryPoint: .pagesList)
+
+        if didOpenEditor {
+            WPAppAnalytics.track(.postListEditAction, withProperties: propertiesForAnalytics(), with: page)
         }
-        WPAppAnalytics.track(.postListEditAction, withProperties: propertiesForAnalytics(), with: apost)
-        showEditor(post: apost)
+    }
+
+    fileprivate func copyPage(_ page: Page) {
+        // Analytics
+        WPAnalytics.track(.postListDuplicateAction, withProperties: propertiesForAnalytics())
+        // Copy Page
+        let newPage = page.blog.createDraftPage()
+        newPage.postTitle = page.postTitle
+        newPage.content = page.content
+        // Open Editor
+        let editorViewController = EditPageViewController(page: newPage)
+        present(editorViewController, animated: false)
+    }
+
+    fileprivate func copyLink(_ page: Page) {
+        let pasteboard = UIPasteboard.general
+        guard let link = page.permaLink else { return }
+        pasteboard.string = link as String
+        let noticeTitle = NSLocalizedString("Link Copied to Clipboard", comment: "Link copied to clipboard notice title")
+        let notice = Notice(title: noticeTitle, feedbackType: .success)
+        ActionDispatcher.dispatch(NoticeAction.dismiss) // Dismiss any old notices
+        ActionDispatcher.dispatch(NoticeAction.post(notice))
     }
 
     fileprivate func retryPage(_ apost: AbstractPost) {
         PostCoordinator.shared.save(apost)
-    }
-
-    fileprivate func showEditor(post: AbstractPost) {
-        let editorFactory = EditorFactory()
-
-        let postViewController = editorFactory.instantiateEditor(
-            for: post,
-            replaceEditor: { [weak self] (editor, replacement) in
-                self?.replaceEditor(editor: editor, replacement: replacement)
-        })
-
-        show(postViewController)
-    }
-
-    private func show(_ editorViewController: EditorViewController) {
-        editorViewController.onClose = { [weak self, weak editorViewController] _, _ in
-            self?._tableViewHandler.isSearching = false
-            editorViewController?.dismiss(animated: true)
-        }
-
-        let navController = UINavigationController(rootViewController: editorViewController)
-        navController.restorationIdentifier = Restorer.Identifier.navigationController.rawValue
-        navController.modalPresentationStyle = .fullScreen
-
-        present(navController, animated: true, completion: nil)
-    }
-
-    func replaceEditor(editor: EditorViewController, replacement: EditorViewController) {
-        editor.dismiss(animated: true) { [weak self] in
-            self?.show(replacement)
-        }
-    }
-
-    // MARK: - Alert
-
-    func presentAlertForPageBeingUploaded() {
-        let message = NSLocalizedString("This page is currently uploading. It won't take long – try again soon and you'll be able to edit it.", comment: "Prompts the user that the page is being uploaded and cannot be edited while that process is ongoing.")
-
-        let alertCancel = NSLocalizedString("OK", comment: "Title of an OK button. Pressing the button acknowledges and dismisses a prompt.")
-
-        let alertController = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-        alertController.addCancelActionWithTitle(alertCancel, handler: nil)
-        alertController.presentFromRootViewController()
     }
 
     fileprivate func draftPage(_ apost: AbstractPost, at indexPath: IndexPath?) {
@@ -559,17 +597,8 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
         let indexPath = tableView.indexPath(for: cell)
 
         let filter = filterSettings.currentPostListFilter().filterType
-
+        let isHomepage = ((page as? Page)?.isSiteHomepage ?? false)
         if filter == .trashed {
-            alertController.addActionWithTitle(publishButtonTitle, style: .default, handler: { [weak self] (action) in
-                guard let strongSelf = self,
-                    let page = strongSelf.pageForObjectID(objectID) else {
-                    return
-                }
-
-                strongSelf.publishPost(page)
-            })
-
             alertController.addActionWithTitle(draftButtonTitle, style: .default, handler: { [weak self] (action) in
                 guard let strongSelf = self,
                     let page = strongSelf.pageForObjectID(objectID) else {
@@ -579,13 +608,13 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
                 strongSelf.draftPage(page, at: indexPath)
             })
 
-            alertController.addActionWithTitle(deleteButtonTitle, style: .default, handler: { [weak self] (action) in
+            alertController.addActionWithTitle(deleteButtonTitle, style: .destructive, handler: { [weak self] (action) in
                 guard let strongSelf = self,
                     let page = strongSelf.pageForObjectID(objectID) else {
                         return
                 }
 
-                strongSelf.deletePost(page)
+                strongSelf.handleTrashPage(page)
             })
         } else if filter == .published {
             if page.isFailed {
@@ -598,6 +627,8 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
                     strongSelf.retryPage(page)
                 })
             } else {
+                addEditAction(to: alertController, for: page)
+
                 alertController.addActionWithTitle(viewButtonTitle, style: .default, handler: { [weak self] (action) in
                     guard let strongSelf = self,
                         let page = strongSelf.pageForObjectID(objectID) else {
@@ -607,26 +638,36 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
                     strongSelf.viewPost(page)
                 })
 
+                addBlazeAction(to: alertController, for: page)
                 addSetParentAction(to: alertController, for: page, at: indexPath)
+                addSetHomepageAction(to: alertController, for: page, at: indexPath)
+                addSetPostsPageAction(to: alertController, for: page, at: indexPath)
+                addDuplicateAction(to: alertController, for: page)
 
-                alertController.addActionWithTitle(draftButtonTitle, style: .default, handler: { [weak self] (action) in
-                    guard let strongSelf = self,
-                        let page = strongSelf.pageForObjectID(objectID) else {
+                if !isHomepage {
+                    alertController.addActionWithTitle(draftButtonTitle, style: .default, handler: { [weak self] (action) in
+                        guard let strongSelf = self,
+                              let page = strongSelf.pageForObjectID(objectID) else {
                             return
-                    }
+                        }
 
-                    strongSelf.draftPage(page, at: indexPath)
-                })
+                        strongSelf.draftPage(page, at: indexPath)
+                    })
+                }
             }
 
-            alertController.addActionWithTitle(trashButtonTitle, style: .default, handler: { [weak self] (action) in
-                guard let strongSelf = self,
-                    let page = strongSelf.pageForObjectID(objectID) else {
-                        return
-                }
+            addCopyLinkAction(to: alertController, for: page)
 
-                strongSelf.deletePost(page)
-            })
+            if !isHomepage {
+                alertController.addActionWithTitle(trashButtonTitle, style: .destructive, handler: { [weak self] (action) in
+                    guard let strongSelf = self,
+                          let page = strongSelf.pageForObjectID(objectID) else {
+                        return
+                    }
+
+                    strongSelf.handleTrashPage(page)
+                })
+            }
         } else {
             if page.isFailed {
                 alertController.addActionWithTitle(retryButtonTitle, style: .default, handler: { [weak self] (action) in
@@ -638,6 +679,8 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
                     strongSelf.retryPage(page)
                 })
             } else {
+                addEditAction(to: alertController, for: page)
+
                 alertController.addActionWithTitle(viewButtonTitle, style: .default, handler: { [weak self] (action) in
                     guard let strongSelf = self,
                         let page = strongSelf.pageForObjectID(objectID) else {
@@ -648,6 +691,7 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
                 })
 
                 addSetParentAction(to: alertController, for: page, at: indexPath)
+                addDuplicateAction(to: alertController, for: page)
 
                 alertController.addActionWithTitle(publishButtonTitle, style: .default, handler: { [weak self] (action) in
                     guard let strongSelf = self,
@@ -659,13 +703,15 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
                 })
             }
 
-            alertController.addActionWithTitle(trashButtonTitle, style: .default, handler: { [weak self] (action) in
+            addCopyLinkAction(to: alertController, for: page)
+
+            alertController.addActionWithTitle(trashButtonTitle, style: .destructive, handler: { [weak self] (action) in
                 guard let strongSelf = self,
                     let page = strongSelf.pageForObjectID(objectID) else {
                         return
                 }
 
-                strongSelf.deletePost(page)
+                strongSelf.handleTrashPage(page)
             })
         }
 
@@ -678,6 +724,60 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
             presentationController.permittedArrowDirections = .any
             presentationController.sourceView = button
             presentationController.sourceRect = button.bounds
+        }
+    }
+
+    override func deletePost(_ apost: AbstractPost) {
+        super.deletePost(apost)
+    }
+
+    private func addBlazeAction(to controller: UIAlertController, for page: AbstractPost) {
+        guard BlazeHelper.isBlazeFlagEnabled() && page.canBlaze else {
+            return
+        }
+
+        let buttonTitle = NSLocalizedString("pages.blaze.actionTitle", value: "Promote with Blaze", comment: "Promote the page with Blaze.")
+        controller.addActionWithTitle(buttonTitle, style: .default, handler: { [weak self] _ in
+            self?.blazePage(page)
+        })
+
+        BlazeEventsTracker.trackEntryPointDisplayed(for: .pagesList)
+    }
+
+    private func addEditAction(to controller: UIAlertController, for page: AbstractPost) {
+        guard let page = page as? Page else { return }
+
+        if page.status == .trash || page.isSitePostsPage {
+            return
+        }
+
+        let buttonTitle = NSLocalizedString("Edit", comment: "Label for a button that opens the Edit Page view controller")
+        controller.addActionWithTitle(buttonTitle, style: .default, handler: { [weak self] _ in
+            if let page = self?.pageForObjectID(page.objectID) {
+                self?.editPage(page)
+            }
+        })
+    }
+
+    private func addDuplicateAction(to controller: UIAlertController, for page: AbstractPost) {
+        if page.status != .publish && page.status != .draft {
+            return
+        }
+
+        let buttonTitle = NSLocalizedString("Duplicate", comment: "Label for page duplicate option. Tapping creates a copy of the page.")
+        controller.addActionWithTitle(buttonTitle, style: .default, handler: { [weak self] _ in
+            if let page = self?.pageForObjectID(page.objectID) {
+                self?.copyPage(page)
+            }
+        })
+    }
+
+    private func addCopyLinkAction(to controller: UIAlertController, for page: AbstractPost) {
+        let buttonTitle = NSLocalizedString("Copy Link", comment: "Label for page copy link. Tapping copy the url of page")
+        controller.addActionWithTitle(buttonTitle, style: .default) { [weak self] _ in
+            if let page = self?.pageForObjectID(page.objectID) {
+                self?.copyLink(page)
+            }
         }
     }
 
@@ -705,10 +805,19 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
         let selectedPage = pageAtIndexPath(index)
         let newIndex = _tableViewHandler.index(for: selectedPage)
         let pages = _tableViewHandler.removePage(from: newIndex)
-        let parentPageNavigationController = ParentPageSettingsViewController.navigationController(with: pages, selectedPage: selectedPage) {
-            self._tableViewHandler.isSearching = false
-        }
+        let parentPageNavigationController = ParentPageSettingsViewController.navigationController(with: pages, selectedPage: selectedPage, onClose: { [weak self] in
+            self?._tableViewHandler.isSearching = false
+            self?._tableViewHandler.refreshTableView(at: index)
+        }, onSuccess: { [weak self] in
+            self?.handleSetParentSuccess()
+        } )
         present(parentPageNavigationController, animated: true)
+    }
+
+    private func handleSetParentSuccess() {
+        let setParentSuccefullyNotice =  NSLocalizedString("Parent page successfully updated.", comment: "Message informing the user that their pages parent has been set successfully")
+        let notice = Notice(title: setParentSuccefullyNotice, feedbackType: .success)
+        ActionDispatcher.global.dispatch(NoticeAction.post(notice))
     }
 
     fileprivate func pageForObjectID(_ objectID: NSManagedObjectID) -> Page? {
@@ -736,6 +845,118 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
         }
     }
 
+    private func addSetHomepageAction(to controller: UIAlertController, for page: AbstractPost, at index: IndexPath?) {
+        let objectID = page.objectID
+
+        /// This button is enabled if
+        /// - Page is not trashed
+        /// - The site's homepage type is .page
+        /// - The page isn't currently the homepage
+        //
+        guard page.status != .trash,
+            let homepageType = blog.homepageType,
+            homepageType == .page,
+            let page = pageForObjectID(objectID),
+            page.isSiteHomepage == false else {
+            return
+        }
+
+        let setHomepageButtonTitle = NSLocalizedString("Set as Homepage", comment: "Label for a button that sets the selected page as the site's Homepage")
+        controller.addActionWithTitle(setHomepageButtonTitle, style: .default, handler: { [weak self] _ in
+            if let pageID = page.postID?.intValue {
+                self?.beginRefreshingManually()
+                WPAnalytics.track(.postListSetHomePageAction)
+                self?.homepageSettingsService?.setHomepageType(.page,
+                                                               homePageID: pageID, success: {
+                                                                self?.refreshAndReload()
+                                                                self?.handleHomepageSettingsSuccess()
+                }, failure: { error in
+                    self?.refreshControl?.endRefreshing()
+                    self?.handleHomepageSettingsFailure()
+                })
+            }
+        })
+    }
+
+    private func addSetPostsPageAction(to controller: UIAlertController, for page: AbstractPost, at index: IndexPath?) {
+        let objectID = page.objectID
+
+        /// This button is enabled if
+        /// - Page is not trashed
+        /// - The site's homepage type is .page
+        /// - The page isn't currently the posts page
+        //
+        guard page.status != .trash,
+            let homepageType = blog.homepageType,
+            homepageType == .page,
+            let page = pageForObjectID(objectID),
+            page.isSitePostsPage == false else {
+            return
+        }
+
+        let setPostsPageButtonTitle = NSLocalizedString("Set as Posts Page", comment: "Label for a button that sets the selected page as the site's Posts page")
+        controller.addActionWithTitle(setPostsPageButtonTitle, style: .default, handler: { [weak self] _ in
+            if let pageID = page.postID?.intValue {
+                self?.beginRefreshingManually()
+                WPAnalytics.track(.postListSetAsPostsPageAction)
+                self?.homepageSettingsService?.setHomepageType(.page,
+                                                               withPostsPageID: pageID, success: {
+                                                                self?.refreshAndReload()
+                                                                self?.handleHomepagePostsPageSettingsSuccess()
+                }, failure: { error in
+                    self?.refreshControl?.endRefreshing()
+                    self?.handleHomepageSettingsFailure()
+                })
+            }
+        })
+    }
+
+    private func handleHomepageSettingsSuccess() {
+        let notice = Notice(title: HomepageSettingsText.updateHomepageSuccessTitle, feedbackType: .success)
+        ActionDispatcher.global.dispatch(NoticeAction.post(notice))
+    }
+
+    private func handleHomepagePostsPageSettingsSuccess() {
+        let notice = Notice(title: HomepageSettingsText.updatePostsPageSuccessTitle, feedbackType: .success)
+        ActionDispatcher.global.dispatch(NoticeAction.post(notice))
+    }
+
+    private func handleHomepageSettingsFailure() {
+        let notice = Notice(title: HomepageSettingsText.updateErrorTitle, message: HomepageSettingsText.updateErrorMessage, feedbackType: .error)
+        ActionDispatcher.global.dispatch(NoticeAction.post(notice))
+    }
+
+    private func handleTrashPage(_ post: AbstractPost) {
+        guard ReachabilityUtils.isInternetReachable() else {
+            let offlineMessage = NSLocalizedString("Unable to trash pages while offline. Please try again later.", comment: "Message that appears when a user tries to trash a page while their device is offline.")
+            ReachabilityUtils.showNoInternetConnectionNotice(message: offlineMessage)
+            return
+        }
+
+        let cancelText = NSLocalizedString("Cancel", comment: "Cancels an Action")
+        let deleteText: String
+        let messageText: String
+        let titleText: String
+
+        if post.status == .trash {
+            deleteText = NSLocalizedString("Delete Permanently", comment: "Delete option in the confirmation alert when deleting a page from the trash.")
+            titleText = NSLocalizedString("Delete Permanently?", comment: "Title of the confirmation alert when deleting a page from the trash.")
+            messageText = NSLocalizedString("Are you sure you want to permanently delete this page?", comment: "Message of the confirmation alert when deleting a page from the trash.")
+        } else {
+            deleteText = NSLocalizedString("Move to Trash", comment: "Trash option in the trash page confirmation alert.")
+            titleText = NSLocalizedString("Trash this page?", comment: "Title of the trash page confirmation alert.")
+            messageText = NSLocalizedString("Are you sure you want to trash this page?", comment: "Message of the trash page confirmation alert.")
+        }
+
+        let alertController = UIAlertController(title: titleText, message: messageText, preferredStyle: .alert)
+
+        alertController.addCancelActionWithTitle(cancelText)
+        alertController.addDestructiveActionWithTitle(deleteText) { [weak self] action in
+            self?.deletePost(post)
+        }
+        alertController.presentFromRootViewController()
+    }
+
     // MARK: - UISearchControllerDelegate
 
     override func willPresentSearchController(_ searchController: UISearchController) {
@@ -757,7 +978,7 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
     }
 
     func didPresentSearchController(_ searchController: UISearchController) {
-        tableView.scrollIndicatorInsets.top = searchController.searchBar.bounds.height + searchController.searchBar.frame.origin.y - view.safeAreaInsets.top
+        tableView.verticalScrollIndicatorInsets.top = searchController.searchBar.bounds.height + searchController.searchBar.frame.origin.y - view.safeAreaInsets.top
     }
 
     func didDismissSearchController(_ searchController: UISearchController) {
@@ -777,6 +998,13 @@ class PageListViewController: AbstractPostListViewController, UIViewControllerRe
     override func noConnectionMessage() -> String {
         return NSLocalizedString("No internet connection. Some pages may be unavailable while offline.",
                                  comment: "Error message shown when the user is browsing Site Pages without an internet connection.")
+    }
+
+    struct HomepageSettingsText {
+        static let updateErrorTitle = NSLocalizedString("Unable to update homepage settings", comment: "Error informing the user that their homepage settings could not be updated")
+        static let updateErrorMessage = NSLocalizedString("Please try again later.", comment: "Prompt for the user to retry a failed action again later")
+        static let updateHomepageSuccessTitle = NSLocalizedString("Homepage successfully updated", comment: "Message informing the user that their static homepage page was set successfully")
+        static let updatePostsPageSuccessTitle = NSLocalizedString("Posts page successfully updated", comment: "Message informing the user that their static homepage for posts was set successfully")
     }
 }
 
@@ -843,6 +1071,8 @@ private extension PageListViewController {
             return NoResultsText.noTrashedTitle
         case .published:
             return NoResultsText.noPublishedTitle
+        case .allNonTrashed:
+            return ""
         }
     }
 

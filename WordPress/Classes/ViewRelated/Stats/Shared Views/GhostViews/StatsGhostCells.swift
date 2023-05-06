@@ -9,12 +9,22 @@ class StatsGhostBaseCell: UITableViewCell {
         setupBorders()
     }
 
+    override func tintColorDidChange() {
+        super.tintColorDidChange()
+        // Restart animation when toggling light/dark mode so colors are updated.
+        restartGhostAnimation(style: GhostCellStyle.muriel)
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
         stopGhostAnimation()
     }
 
     private func setupBorders() {
+        guard FeatureFlag.statsNewAppearance.disabled else {
+            return
+        }
+
         topBorder = addTopBorder(withColor: .divider)
         topBorder?.isGhostableDisabled = true
 
@@ -23,6 +33,7 @@ class StatsGhostBaseCell: UITableViewCell {
     }
 }
 
+class StatsGhostGrowAudienceCell: StatsGhostBaseCell, NibLoadable { }
 class StatsGhostTwoColumnCell: StatsGhostBaseCell, NibLoadable { }
 class StatsGhostTopCell: StatsGhostBaseCell, NibLoadable { }
 class StatsGhostTopHeaderCell: StatsGhostBaseCell, NibLoadable {

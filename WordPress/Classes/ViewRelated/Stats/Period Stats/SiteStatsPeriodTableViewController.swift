@@ -10,9 +10,14 @@ import WordPressFlux
     @objc optional func showPostStats(postID: Int, postTitle: String?, postURL: URL?)
 }
 
+protocol SiteStatsReferrerDelegate: AnyObject {
+    func showReferrerDetails(_ data: StatsTotalRowData)
+}
 
 class SiteStatsPeriodTableViewController: UITableViewController, StoryboardLoadable {
     static var defaultStoryboardName: String = "SiteStatsDashboard"
+
+    weak var bannerView: JetpackBannerView?
 
     // MARK: - Properties
 
@@ -22,10 +27,6 @@ class SiteStatsPeriodTableViewController: UITableViewController, StoryboardLoada
 
     private lazy var mediaService: MediaService = {
         return MediaService(managedObjectContext: mainContext)
-    }()
-
-    private lazy var blogService: BlogService = {
-        return BlogService(managedObjectContext: mainContext)
     }()
 
     var selectedDate: Date?
@@ -72,13 +73,24 @@ class SiteStatsPeriodTableViewController: UITableViewController, StoryboardLoada
         WPStyleGuide.Stats.configureTable(tableView)
         refreshControl?.addTarget(self, action: #selector(userInitiatedRefresh), for: .valueChanged)
         ImmuTable.registerRows(tableRowTypes(), tableView: tableView)
-        tableView.register(SiteStatsTableHeaderView.defaultNib,
-                           forHeaderFooterViewReuseIdentifier: SiteStatsTableHeaderView.defaultNibName)
         tableView.estimatedRowHeight = 500
+        tableView.estimatedSectionHeaderHeight = SiteStatsTableHeaderView.estimatedHeight
+        sendScrollEventsToBanner()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if !isMovingToParent {
+            guard let date = selectedDate, let period = selectedPeriod else {
+                return
+            }
+            addViewModelListeners()
+            viewModel?.refreshPeriodOverviewData(withDate: date, forPeriod: period, resetOverviewCache: false)
+        }
     }
 
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        guard let cell = tableView.dequeueReusableHeaderFooterView(withIdentifier: SiteStatsTableHeaderView.defaultNibName) as? SiteStatsTableHeaderView else {
+        guard let cell = Bundle.main.loadNibNamed("SiteStatsTableHeaderView", owner: nil, options: nil)?.first as? SiteStatsTableHeaderView else {
             return nil
         }
 
@@ -88,9 +100,6 @@ class SiteStatsPeriodTableViewController: UITableViewController, StoryboardLoada
         return cell
     }
 
-    override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return SiteStatsTableHeaderView.headerHeight()
-    }
 }
 
 extension SiteStatsPeriodTableViewController: StatsBarChartViewDelegate {
@@ -117,7 +126,8 @@ private extension SiteStatsPeriodTableViewController {
         viewModel = SiteStatsPeriodViewModel(store: store,
                                              selectedDate: selectedDate,
                                              selectedPeriod: selectedPeriod,
-                                             periodDelegate: self)
+                                             periodDelegate: self,
+                                             referrerDelegate: self)
         viewModel?.statsBarChartViewDelegate = self
         addViewModelListeners()
         viewModel?.startFetchingOverview()
@@ -196,7 +206,6 @@ private extension SiteStatsPeriodTableViewController {
     func viewIsVisible() -> Bool {
         return isViewLoaded && view.window != nil
     }
-
 }
 
 // MARK: - NoResultsViewHost
@@ -210,12 +219,12 @@ extension SiteStatsPeriodTableViewController: NoResultsViewHost {
         configureAndDisplayNoResults(on: tableView,
                                      title: NoResultConstants.errorTitle,
                                      subtitle: NoResultConstants.errorSubtitle,
-                                     buttonTitle: NoResultConstants.refreshButtonTitle) { [weak self] noResults in
+                                     buttonTitle: NoResultConstants.refreshButtonTitle, customizationBlock: { [weak self] noResults in
                                         noResults.delegate = self
                                         if !noResults.isReachable {
                                             noResults.resetButtonText()
                                         }
-        }
+                                     })
     }
 
     private enum NoResultConstants {
@@ -239,17 +248,16 @@ extension SiteStatsPeriodTableViewController: NoResultsViewControllerDelegate {
 extension SiteStatsPeriodTableViewController: SiteStatsPeriodDelegate {
 
     func displayWebViewWithURL(_ url: URL) {
-        let webViewController = WebViewControllerFactory.controllerAuthenticatedWithDefaultAccount(url: url)
+        let webViewController = WebViewControllerFactory.controllerAuthenticatedWithDefaultAccount(url: url, source: "site_stats_period")
         let navController = UINavigationController.init(rootViewController: webViewController)
         present(navController, animated: true)
     }
 
     func displayMediaWithID(_ mediaID: NSNumber) {
 
-        guard let siteID = SiteStatsInformation.sharedInstance.siteID,
-            let blog = blogService.blog(byBlogId: siteID) else {
-                DDLogInfo("Unable to get blog when trying to show media from Stats.")
-                return
+        guard let siteID = SiteStatsInformation.sharedInstance.siteID, let blog = Blog.lookup(withID: siteID, in: mainContext) else {
+            DDLogInfo("Unable to get blog when trying to show media from Stats.")
+            return
         }
 
         mediaService.getMediaWithID(mediaID, in: blog, success: { (media) in
@@ -284,11 +292,19 @@ extension SiteStatsPeriodTableViewController: SiteStatsPeriodDelegate {
     func showPostStats(postID: Int, postTitle: String?, postURL: URL?) {
         removeViewModelListeners()
 
-        let postStatsTableViewController = PostStatsTableViewController.loadFromStoryboard()
-        postStatsTableViewController.configure(postID: postID, postTitle: postTitle, postURL: postURL)
+        let postStatsTableViewController = PostStatsTableViewController.withJPBannerForBlog(postID: postID,
+                                                                                            postTitle: postTitle,
+                                                                                            postURL: postURL)
         navigationController?.pushViewController(postStatsTableViewController, animated: true)
     }
+}
 
+// MARK: - SiteStatsReferrerDelegate
+
+extension SiteStatsPeriodTableViewController: SiteStatsReferrerDelegate {
+    func showReferrerDetails(_ data: StatsTotalRowData) {
+        show(ReferrerDetailsTableViewController(data: data), sender: nil)
+    }
 }
 
 // MARK: - SiteStatsTableHeaderDelegate Methods
@@ -302,6 +318,17 @@ extension SiteStatsPeriodTableViewController: SiteStatsTableHeaderDateButtonDele
     func didTouchHeaderButton(forward: Bool) {
         if let intervalDate = viewModel?.updateDate(forward: forward) {
             tableHeaderView?.updateDate(with: intervalDate)
+        }
+    }
+}
+
+// MARK: Jetpack powered banner
+
+private extension SiteStatsPeriodTableViewController {
+
+    func sendScrollEventsToBanner() {
+        if let bannerView = bannerView {
+            analyticsTracker.addTranslationObserver(bannerView)
         }
     }
 }

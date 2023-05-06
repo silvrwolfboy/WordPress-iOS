@@ -1,8 +1,8 @@
-/// Encapsulates logic to approve a cooment
+/// Encapsulates logic to approve a comment
 class ApproveComment: DefaultNotificationActionCommand {
     enum TitleStrings {
-        static let approve = NSLocalizedString("Approve", comment: "Approves a Comment")
-        static let unapprove = NSLocalizedString("Unapprove", comment: "Unapproves a Comment")
+        static let approve = NSLocalizedString("Approve Comment", comment: "Approves a Comment")
+        static let unapprove = NSLocalizedString("Unapprove Comment", comment: "Unapproves a Comment")
     }
 
     enum TitleHints {
@@ -18,8 +18,11 @@ class ApproveComment: DefaultNotificationActionCommand {
         return on ? .neutral(.shade30) : .primary
     }
 
-    override func execute<ObjectType: FormattableCommentContent>(context: ActionContext<ObjectType>) {
-        let block = context.block
+    override func execute<ObjectType: FormattableContent>(context: ActionContext<ObjectType>) {
+        guard let block = context.block as? FormattableCommentContent else {
+            super.execute(context: context)
+            return
+        }
         if on {
             unApprove(block: block)
         } else {

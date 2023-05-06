@@ -1,7 +1,80 @@
+import AutomatticTracks
 import Aztec
 import Gridicons
 
+final class AuthenticatedImageDownload: AsyncOperation {
+    let url: URL
+    let blogObjectID: NSManagedObjectID
+    private let callbackQueue: DispatchQueue
+    private let onSuccess: (UIImage) -> ()
+    private let onFailure: (Error) -> ()
+
+    init(url: URL, blogObjectID: NSManagedObjectID, callbackQueue: DispatchQueue, onSuccess: @escaping (UIImage) -> (), onFailure: @escaping (Error) -> ()) {
+        self.url = url
+        self.blogObjectID = blogObjectID
+        self.callbackQueue = callbackQueue
+        self.onSuccess = onSuccess
+        self.onFailure = onFailure
+    }
+
+    override func main() {
+        let result = ContextManager.shared.performQuery { context in
+            Result {
+                let blog = try context.existingObject(with: self.blogObjectID) as! Blog
+                return MediaHost(with: blog) { error in
+                    // We'll log the error, so we know it's there, but we won't halt execution.
+                    WordPressAppDelegate.crashLogging?.logError(error)
+                }
+            }
+        }
+
+        let host: MediaHost
+        do {
+            host = try result.get()
+        } catch {
+            self.state = .isFinished
+            self.callbackQueue.async {
+                self.onFailure(error)
+            }
+            return
+        }
+
+        let mediaRequestAuthenticator = MediaRequestAuthenticator()
+        mediaRequestAuthenticator.authenticatedRequest(
+            for: url,
+            from: host,
+            onComplete: { request in
+                ImageDownloader.shared.downloadImage(for: request) { (image, error) in
+                    self.state = .isFinished
+
+                    self.callbackQueue.async {
+                        guard let image = image else {
+                            DDLogError("Unable to download image for attachment with url = \(String(describing: request.url)). Details: \(String(describing: error?.localizedDescription))")
+                            if let error = error {
+                                self.onFailure(error)
+                            } else {
+                                self.onFailure(NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown, userInfo: nil))
+                            }
+
+                            return
+                        }
+
+                        self.onSuccess(image)
+                    }
+                }
+            },
+            onFailure: { error in
+                self.state = .isFinished
+                self.callbackQueue.async {
+                    self.onFailure(error)
+                }
+            }
+        )
+    }
+}
+
 class EditorMediaUtility {
+    private static let InternalInconsistencyError = NSError(domain: NSExceptionName.internalInconsistencyException.rawValue, code: 0)
 
     private struct Constants {
         static let placeholderDocumentLink = URL(string: "documentUploading://")!
@@ -12,16 +85,16 @@ class EditorMediaUtility {
         switch attachment {
         case let imageAttachment as ImageAttachment:
             if imageAttachment.url == Constants.placeholderDocumentLink {
-                icon = Gridicon.iconOfType(.pages, withSize: size)
+                icon = .gridicon(.pages, size: size)
             } else {
-                icon = Gridicon.iconOfType(.image, withSize: size)
+                icon = .gridicon(.image, size: size)
             }
         case _ as VideoAttachment:
-            icon = Gridicon.iconOfType(.video, withSize: size)
+            icon = .gridicon(.video, size: size)
         default:
-            icon = Gridicon.iconOfType(.attachment, withSize: size)
+            icon = .gridicon(.attachment, size: size)
         }
-        if #available(iOS 13.0, *), let color = tintColor {
+        if let color = tintColor {
             icon = icon.withTintColor(color)
         }
         icon.addAccessibilityForAttachment(attachment)
@@ -45,85 +118,106 @@ class EditorMediaUtility {
     }
 
 
-    func downloadImage(from url: URL, post: AbstractPost, success: @escaping (UIImage) -> Void, onFailure failure: @escaping (Error) -> Void) -> ImageDownloader.Task {
+    func downloadImage(
+        from url: URL,
+        post: AbstractPost,
+        success: @escaping (UIImage) -> Void,
+        onFailure failure: @escaping (Error) -> Void) -> ImageDownloaderTask {
+
         let imageMaxDimension = max(UIScreen.main.bounds.size.width, UIScreen.main.bounds.size.height)
         //use height zero to maintain the aspect ratio when fetching
         let size = CGSize(width: imageMaxDimension, height: 0)
         let scale = UIScreen.main.scale
+
         return downloadImage(from: url, size: size, scale: scale, post: post, success: success, onFailure: failure)
     }
 
-    func downloadImage(from url: URL, size requestSize: CGSize, scale: CGFloat, post: AbstractPost, success: @escaping (UIImage) -> Void, onFailure failure: @escaping (Error) -> Void) -> ImageDownloader.Task {
-        var requestURL = url
+    func downloadImage(
+        from url: URL,
+        size requestSize: CGSize,
+        scale: CGFloat,
+        post: AbstractPost,
+        success: @escaping (UIImage) -> Void,
+        onFailure failure: @escaping (Error) -> Void
+    ) -> ImageDownloaderTask {
+
         let imageMaxDimension = max(requestSize.width, requestSize.height)
         //use height zero to maintain the aspect ratio when fetching
         var size = CGSize(width: imageMaxDimension, height: 0)
-        let request: URLRequest
-
-        if url.isFileURL {
-            request = URLRequest(url: url)
-        } else if post.blog.isPrivate() && PrivateSiteURLProtocol.urlGoes(toWPComSite: url) {
-            // private wpcom image needs special handling.
-            // the size that WPImageHelper expects is pixel size
-            size.width = size.width * scale
-            requestURL = WPImageURLHelper.imageURLWithSize(size, forImageURL: requestURL)
-            request = PrivateSiteURLProtocol.requestForPrivateSite(from: requestURL)
-        } else if !post.blog.isHostedAtWPcom && post.blog.isBasicAuthCredentialStored() {
-            size.width = size.width * scale
-            requestURL = WPImageURLHelper.imageURLWithSize(size, forImageURL: requestURL)
-            request = URLRequest(url: requestURL)
-        } else {
-            // the size that PhotonImageURLHelper expects is points size
-            requestURL = PhotonImageURLHelper.photonURL(with: size, forImageURL: requestURL)
-            request = URLRequest(url: requestURL)
+        let (requestURL, blogObjectID) = workaroundCoreDataConcurrencyIssue(accessing: post) {
+            let requestURL: URL
+            if url.isFileURL {
+                requestURL = url
+            } else if post.isPrivateAtWPCom() && url.isHostedAtWPCom {
+                // private wpcom image needs special handling.
+                // the size that WPImageHelper expects is pixel size
+                size.width = size.width * scale
+                requestURL = WPImageURLHelper.imageURLWithSize(size, forImageURL: url)
+            } else if !post.blog.isHostedAtWPcom && post.blog.isBasicAuthCredentialStored() {
+                size.width = size.width * scale
+                requestURL = WPImageURLHelper.imageURLWithSize(size, forImageURL: url)
+            } else {
+                // the size that PhotonImageURLHelper expects is points size
+                requestURL = PhotonImageURLHelper.photonURL(with: size, forImageURL: url)
+            }
+            return (requestURL, post.blog.objectID)
         }
 
-        return ImageDownloader.shared.downloadImage(for: request) { [weak self] (image, error) in
-            guard let _ = self else {
+        let imageDownload = AuthenticatedImageDownload(
+            url: requestURL,
+            blogObjectID: blogObjectID,
+            callbackQueue: .main,
+            onSuccess: success,
+            onFailure: failure)
+
+        imageDownload.start()
+        return imageDownload
+    }
+
+    static func fetchRemoteVideoURL(for media: Media, in post: AbstractPost, withToken: Bool = false, completion: @escaping ( Result<(URL), Error> ) -> Void) {
+        // Return the attachment url it it's not a VideoPress video
+        if media.videopressGUID == nil {
+            guard let videoURLString = media.remoteURL, let videoURL = URL(string: videoURLString) else {
+                DDLogError("Unable to find remote video URL for video with upload ID = \(media.uploadID).")
+                completion(Result.failure(InternalInconsistencyError))
                 return
             }
-
-            DispatchQueue.main.async {
-                guard let image = image else {
-                    DDLogError("Unable to download image for attachment with url = \(url). Details: \(String(describing: error?.localizedDescription))")
-                    if let error = error {
-                        failure(error)
-                    } else {
-                        failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown, userInfo: nil))
+            completion(Result.success(videoURL))
+        }
+        else {
+            fetchVideoPressMetadata(for: media, in: post) { result in
+                switch result {
+                case .success((let metadata)):
+                    guard let originalURL = metadata.originalURL else {
+                        DDLogError("Failed getting original URL for media with upload ID: \(media.uploadID)")
+                        completion(Result.failure(InternalInconsistencyError))
+                        return
                     }
-                    return
+                    if withToken {
+                        completion(Result.success(metadata.getURLWithToken(url: originalURL) ?? originalURL))
+                    }
+                    else {
+                        completion(Result.success(originalURL))
+                    }
+                case .failure(let error):
+                    completion(Result.failure(error))
                 }
-
-                success(image)
             }
         }
     }
 
-    static func fetchRemoteVideoURL(for media: Media, in post: AbstractPost, completion: @escaping ( Result<(videoURL: URL, posterURL: URL?), Error> ) -> Void) {
+    static func fetchVideoPressMetadata(for media: Media, in post: AbstractPost, completion: @escaping ( Result<(RemoteVideoPressVideo), Error> ) -> Void) {
         guard let videoPressID = media.videopressGUID else {
-            //the site can be a self-hosted site if there's no videopressGUID
-            if let videoURLString = media.remoteURL,
-                let videoURL = URL(string: videoURLString) {
-                completion(Result.success((videoURL: videoURL, posterURL: nil)))
-            } else {
-                DDLogError("Unable to find remote video URL for video with upload ID = \(media.uploadID).")
-                completion(Result.failure(NSError()))
-            }
+            DDLogError("Unable to find metadata for video with upload ID = \(media.uploadID).")
+            completion(Result.failure(InternalInconsistencyError))
             return
         }
+
         let mediaService = MediaService(managedObjectContext: ContextManager.sharedInstance().mainContext)
-        mediaService.getMediaURL(fromVideoPressID: videoPressID, in: post.blog, success: { (videoURLString, posterURLString) in
-            guard let videoURL = URL(string: videoURLString) else {
-                completion(Result.failure(NSError()))
-                return
-            }
-            var posterURL: URL?
-            if let validPosterURLString = posterURLString, let url = URL(string: validPosterURLString) {
-                posterURL = url
-            }
-            completion(Result.success((videoURL: videoURL, posterURL: posterURL)))
+        mediaService.getMetadataFromVideoPressID(videoPressID, in: post.blog, success: { (metadata) in
+            completion(Result.success(metadata))
         }, failure: { (error) in
-            DDLogError("Unable to find information for VideoPress video with ID = \(videoPressID). Details: \(error.localizedDescription)")
+            DDLogError("Unable to find metadata for VideoPress video with ID = \(videoPressID). Details: \(error.localizedDescription)")
             completion(Result.failure(error))
         })
     }

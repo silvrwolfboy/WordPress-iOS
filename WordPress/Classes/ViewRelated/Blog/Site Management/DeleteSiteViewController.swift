@@ -38,6 +38,7 @@ open class DeleteSiteViewController: UITableViewController {
     @IBOutlet fileprivate weak var supportButton: UIButton!
     @IBOutlet fileprivate weak var deleteSiteButton: UIButton!
     @IBOutlet private var deleteButtonContainerView: UIView!
+    private let alertHelper = DestructiveAlertHelper()
 
     // MARK: - View Lifecycle
 
@@ -69,7 +70,7 @@ open class DeleteSiteViewController: UITableViewController {
     /// One time setup of section one (header)
     ///
     fileprivate func setupHeaderSection() {
-        let warningIcon = Gridicon.iconOfType(.notice, withSize: CGSize(width: 48.0, height: 48.0))
+        let warningIcon = UIImage.gridicon(.notice, size: CGSize(width: 48.0, height: 48.0))
         warningImage.image = warningIcon
         warningImage.tintColor = UIColor.warning
         siteTitleLabel.textColor = .neutral(.shade70)
@@ -154,7 +155,7 @@ open class DeleteSiteViewController: UITableViewController {
     fileprivate func setupDeleteButton() {
         deleteButtonContainerView.backgroundColor = .listForeground
 
-        let trashIcon = Gridicon.iconOfType(.trash)
+        let trashIcon = UIImage.gridicon(.trash)
         deleteSiteButton.setTitle(NSLocalizedString("Delete Site", comment: "Button label for deleting the current site"), for: .normal)
         deleteSiteButton.tintColor = .error
         deleteSiteButton.setImage(trashIcon.imageWithTintColor(.error), for: .normal)
@@ -167,8 +168,11 @@ open class DeleteSiteViewController: UITableViewController {
     // MARK: - Actions
 
     @IBAction func deleteSite(_ sender: Any) {
+        guard let alert = confirmDeleteController() else {
+            return
+        }
         tableView.deselectSelectedRowWithAnimation(true)
-        present(confirmDeleteController(), animated: true)
+        present(alert, animated: true)
     }
 
     @IBAction func contactSupport(_ sender: Any) {
@@ -176,13 +180,9 @@ open class DeleteSiteViewController: UITableViewController {
 
         WPAppAnalytics.track(.siteSettingsStartOverContactSupportClicked, with: blog)
 
-        if ZendeskUtils.zendeskEnabled {
-            ZendeskUtils.sharedInstance.showNewRequestIfPossible(from: self, with: .deleteSite)
-        } else {
-            if let contact = URL(string: "https://support.wordpress.com/contact/") {
-                UIApplication.shared.open(contact)
-            }
-        }
+        let supportViewController = SupportTableViewController()
+        supportViewController.sourceTag = .deleteSite
+        supportViewController.showFromTabBar()
     }
 
     // MARK: - Delete Site Helpers
@@ -191,55 +191,19 @@ open class DeleteSiteViewController: UITableViewController {
     ///
     /// - Returns: UIAlertController
     ///
-    fileprivate func confirmDeleteController() -> UIAlertController {
+    fileprivate func confirmDeleteController() -> UIAlertController? {
+        guard let value = blog.displayURL as String? else {
+            return nil
+        }
 
-        // Create atributed strings for URL and message body so we can wrap the URL byCharWrapping.
-        let styledUrl: NSMutableAttributedString = NSMutableAttributedString(string: blog.displayURL! as String)
-        let urlParagraphStyle = NSMutableParagraphStyle()
-        urlParagraphStyle.lineBreakMode = .byCharWrapping
-        styledUrl.addAttribute(.paragraphStyle, value: urlParagraphStyle, range: NSMakeRange(0, styledUrl.string.count - 1))
-
+        let title = NSLocalizedString("Confirm Delete Site",
+                                      comment: "Title of Delete Site confirmation alert")
         let message = NSLocalizedString("\nTo confirm, please re-enter your site's address before deleting.\n\n",
-                                             comment: "Message of Delete Site confirmation alert; substitution is site's host.")
-        let styledMessage: NSMutableAttributedString = NSMutableAttributedString(string: message)
-        styledMessage.append(styledUrl)
+                                        comment: "Message of Delete Site confirmation alert; substitution is site's host.")
+        let destructiveActionTitle = NSLocalizedString("Permanently Delete Site",
+                                                       comment: "Delete Site confirmation action title")
 
-        // Create alert
-        let confirmTitle = NSLocalizedString("Confirm Delete Site", comment: "Title of Delete Site confirmation alert")
-        let alertController = UIAlertController(title: confirmTitle, message: nil, preferredStyle: .alert)
-        alertController.setValue(styledMessage, forKey: "attributedMessage")
-
-        let cancelTitle = NSLocalizedString("Cancel", comment: "Alert dismissal title")
-        alertController.addCancelActionWithTitle(cancelTitle, handler: nil)
-
-        let deleteTitle = NSLocalizedString("Permanently Delete Site", comment: "Delete Site confirmation action title")
-        let deleteAction = UIAlertAction(title: deleteTitle, style: .destructive, handler: { action in
-            self.deleteSiteConfirmed()
-        })
-        deleteAction.isEnabled = false
-        alertController.addAction(deleteAction)
-
-        alertController.addTextField(configurationHandler: { textField in
-            textField.addTarget(self, action: #selector(DeleteSiteViewController.alertTextFieldDidChange(_:)), for: .editingChanged)
-        })
-
-        return alertController
-    }
-
-    /// Verifies site address as password for Delete Site
-    ///
-    @objc func alertTextFieldDidChange(_ sender: UITextField) {
-        guard let deleteAction = (presentedViewController as? UIAlertController)?.actions.last else {
-            return
-        }
-
-        guard deleteAction.style == .destructive else {
-            return
-        }
-
-        let prompt = blog.displayURL?.lowercased.trim()
-        let password = sender.text?.lowercased().trim()
-        deleteAction.isEnabled = prompt == password
+        return alertHelper.makeAlertWithConfirmation(title: title, message: message, valueToConfirm: value, destructiveActionTitle: destructiveActionTitle, destructiveAction: deleteSiteConfirmed)
     }
 
     /// Handles deletion of the blog's site and all content from WordPress.com
@@ -253,7 +217,7 @@ open class DeleteSiteViewController: UITableViewController {
 
         let trackedBlog = blog
         WPAppAnalytics.track(.siteSettingsDeleteSiteRequested, with: trackedBlog)
-        let service = SiteManagementService(managedObjectContext: ContextManager.sharedInstance().mainContext)
+        let service = SiteManagementService(coreDataStack: ContextManager.sharedInstance())
         service.deleteSiteForBlog(blog,
                                   success: { [weak self] in
                                     WPAppAnalytics.track(.siteSettingsDeleteSiteResponseOK, with: trackedBlog)
@@ -262,10 +226,13 @@ open class DeleteSiteViewController: UITableViewController {
 
                                     self?.updateNavigationStackAfterSiteDeletion()
 
-                                    let accountService = AccountService(managedObjectContext: ContextManager.sharedInstance().mainContext)
-                                    accountService.updateUserDetails(for: (accountService.defaultWordPressComAccount()!),
-                                                                     success: { () in },
-                                                                     failure: { _ in })
+                                    let context = ContextManager.shared.mainContext
+                                    let account = try? WPAccount.lookupDefaultWordPressComAccount(in: context)
+                                    if let account = account {
+                                        AccountService(coreDataStack: ContextManager.sharedInstance()).updateUserDetails(for: account,
+                                                                                                        success: {},
+                                                                                                        failure: { _ in })
+                                    }
             },
                                   failure: { error in
                                     DDLogError("Error deleting site: \(error.localizedDescription)")

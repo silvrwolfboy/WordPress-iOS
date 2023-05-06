@@ -14,6 +14,10 @@ final class InteractiveNotificationsManager: NSObject {
     ///
     @objc static let shared = InteractiveNotificationsManager()
 
+    /// The analytics event tracker.
+    ///
+    private let eventTracker = NotificationEventTracker()
+
     /// Returns the Core Data main context.
     ///
     @objc var context: NSManagedObjectContext {
@@ -23,7 +27,7 @@ final class InteractiveNotificationsManager: NSObject {
     /// Returns a CommentService instance.
     ///
     @objc var commentService: CommentService {
-        return CommentService(managedObjectContext: context)
+        return CommentService(coreDataStack: ContextManager.shared)
     }
 
     /// Returns a NotificationSyncMediator instance.
@@ -48,26 +52,24 @@ final class InteractiveNotificationsManager: NSObject {
     /// The first time this method is called it will ask the user for permission to show notifications.
     /// Because of this, this should be called only when we know we will need to show notifications (for instance, after login).
     ///
-    @objc func requestAuthorization(completion: @escaping () -> ()) {
+    @objc func requestAuthorization(completion: @escaping (_ allowed: Bool) -> Void) {
         defer {
             WPAnalytics.track(.pushNotificationOSAlertShown)
         }
 
-        var options: UNAuthorizationOptions = [.badge, .sound, .alert]
-        if #available(iOS 12.0, *) {
-            options.insert(.providesAppNotificationSettings)
-        }
+        let options: UNAuthorizationOptions = [.badge, .sound, .alert, .providesAppNotificationSettings]
 
         let notificationCenter = UNUserNotificationCenter.current()
-        notificationCenter.requestAuthorization(options: options) { (allowed, _)  in
+        notificationCenter.requestAuthorization(options: options) { [weak self] (allowed, _)  in
             DispatchQueue.main.async {
                 if allowed {
                     WPAnalytics.track(.pushNotificationOSAlertAllowed)
+                    self?.disableWordPressNotificationsIfNeeded()
                 } else {
                     WPAnalytics.track(.pushNotificationOSAlertDenied)
                 }
             }
-            completion()
+            completion(allowed)
         }
     }
 
@@ -80,10 +82,14 @@ final class InteractiveNotificationsManager: NSObject {
     /// - Returns: True on success
     ///
     @objc @discardableResult
-    func handleAction(with identifier: String, category: String, userInfo: NSDictionary, responseText: String?) -> Bool {
+    func handleAction(with identifier: String, category: String, threadId: String?, userInfo: NSDictionary, responseText: String?) -> Bool {
         if let noteCategory = NoteCategoryDefinition(rawValue: category),
             noteCategory.isLocalNotification {
-            return handleLocalNotificationAction(with: identifier, category: category, userInfo: userInfo, responseText: responseText)
+            return handleLocalNotificationAction(with: identifier, category: category, threadId: threadId, userInfo: userInfo, responseText: responseText)
+        }
+
+        if NoteActionDefinition.approveLogin == NoteActionDefinition(rawValue: identifier) {
+            return approveAuthChallenge(userInfo)
         }
 
         guard AccountHelper.isDotcomAvailable(),
@@ -137,7 +143,7 @@ final class InteractiveNotificationsManager: NSObject {
         return true
     }
 
-    func handleLocalNotificationAction(with identifier: String, category: String, userInfo: NSDictionary, responseText: String?) -> Bool {
+    func handleLocalNotificationAction(with identifier: String, category: String, threadId: String?, userInfo: NSDictionary, responseText: String?) -> Bool {
         if let noteCategory = NoteCategoryDefinition(rawValue: category) {
             switch noteCategory {
             case .mediaUploadSuccess, .mediaUploadFailure:
@@ -191,11 +197,110 @@ final class InteractiveNotificationsManager: NSObject {
                     ShareNoticeNavigationCoordinator.navigateToBlogDetails(with: userInfo)
                     return true
                 }
+            case .bloggingReminderWeekly:
+                // This event should actually be tracked for all notification types, but in order to implement
+                // the tracking this correctly we'll have to review the other notification_type values to match Android.
+                // https://github.com/wordpress-mobile/WordPress-Android/blob/e3b65c4b1adc0fbc102e640750990d7655d89185/WordPress/src/main/java/org/wordpress/android/push/NotificationType.kt
+                //
+                // Since this task is non-trivial and beyond the scope of my current work, I'll only track this
+                // specific notification type for now in a way that matches Android, but using a mechanism that
+                // is extensible to track other notification types in the future.
+                eventTracker.notificationTapped(type: .bloggingReminders)
+
+                if identifier == UNNotificationDefaultActionIdentifier {
+                    let targetBlog: Blog? = blog(from: threadId)
+
+                    RootViewCoordinator.sharedPresenter.mySitesCoordinator.showCreateSheet(for: targetBlog)
+                }
+            case .weeklyRoundup:
+                let targetBlog = blog(from: userInfo)
+                let siteId = targetBlog?.dotComID?.intValue
+
+                eventTracker.notificationTapped(type: .weeklyRoundup, siteId: siteId)
+
+                if identifier == UNNotificationDefaultActionIdentifier {
+                    guard let targetBlog = targetBlog else {
+                        DDLogError("Could not obtain the blog from the Weekly Notification thread ID.")
+                        break
+                    }
+
+                    let targetDate = date(from: userInfo)
+
+                    RootViewCoordinator.sharedPresenter.mySitesCoordinator.showStats(
+                        for: targetBlog,
+                        timePeriod: .weeks,
+                        date: targetDate)
+                }
+
+            case .bloggingPrompt:
+                WPAnalytics.track(.bloggingRemindersNotificationReceived, properties: ["prompt_included": true])
+
+                let answerPromptBlock = {
+                    RootViewCoordinator.shared.showPromptAnsweringFlow(with: userInfo)
+                }
+
+                // check if user interacted with custom notification actions.
+                if let action = NoteActionDefinition(rawValue: identifier) {
+                    switch action {
+                    case .answerPrompt: // user taps on the "Answer" button.
+                        WPAnalytics.track(.promptsNotificationAnswerActionTapped)
+                        answerPromptBlock()
+
+                    case .dismissPrompt: // user taps on the "Dismiss" button.
+                        WPAnalytics.track(.promptsNotificationDismissActionTapped)
+                        // no-op, let the notification be dismissed.
+
+                    default:
+                        break
+                    }
+                }
+
+                // handle default notification actions.
+                if identifier == UNNotificationDefaultActionIdentifier {
+                    WPAnalytics.track(.promptsNotificationTapped)
+                    answerPromptBlock()
+
+                } else if identifier == UNNotificationDismissActionIdentifier {
+                    WPAnalytics.track(.promptsNotificationDismissed)
+                    // no-op
+                }
+
             default: break
             }
         }
 
         return true
+    }
+}
+
+// MARK: - Notifications: Retrieving Stored Data
+
+extension InteractiveNotificationsManager {
+
+    static let blogIDKey = "blogID"
+    static let dateKey = "date"
+
+    private func blog(from userInfo: NSDictionary) -> Blog? {
+        if let blogID = userInfo[Self.blogIDKey] as? Int {
+            return try? Blog.lookup(withID: blogID, in: ContextManager.shared.mainContext)
+        }
+
+        return nil
+    }
+
+    private func blog(from threadId: String?) -> Blog? {
+        if let threadId = threadId,
+           let blogId = Int(threadId) {
+            return try? Blog.lookup(withID: blogId, in: ContextManager.shared.mainContext)
+        }
+
+        return nil
+    }
+
+    /// Retrieves a date from the userInfo dictionary using a generic "date" key.  This was made generic on purpose.
+    ///
+    private func date(from userInfo: NSDictionary) -> Date? {
+        userInfo[Self.dateKey] as? Date
     }
 }
 
@@ -241,7 +346,7 @@ private extension InteractiveNotificationsManager {
     /// - Parameter noteID: The Notification's Identifier
     ///
     func showDetailsWithNoteID(_ noteId: NSNumber) {
-        WPTabBarController.sharedInstance().showNotificationsTabForNote(withID: noteId.stringValue)
+        RootViewCoordinator.sharedPresenter.showNotificationsTabForNote(withID: noteId.stringValue)
     }
 
 
@@ -271,13 +376,22 @@ private extension InteractiveNotificationsManager {
         let categories: [UNNotificationCategory] = NoteCategoryDefinition.allDefinitions.map({ $0.notificationCategory() })
         return Set(categories)
     }
+
+    /// Handles approving an 2fa authentication challenge.
+    ///
+    /// - Parameter userInfo: The notification's Payload
+    /// - Returns: True if successfule. Otherwise false.
+    ///
+    func approveAuthChallenge(_ userInfo: NSDictionary) -> Bool {
+        return PushNotificationsManager.shared.handleAuthenticationApprovedAction(userInfo)
+    }
 }
 
 
 
 // MARK: - Nested Types
 //
-private extension InteractiveNotificationsManager {
+extension InteractiveNotificationsManager {
 
     /// Describes information about Custom Actions that WPiOS can perform, as a response to
     /// a Push Notification event.
@@ -293,6 +407,10 @@ private extension InteractiveNotificationsManager {
         case postUploadFailure      = "post-upload-failure"
         case shareUploadSuccess     = "share-upload-success"
         case shareUploadFailure     = "share-upload-failure"
+        case login                  = "push_auth"
+        case bloggingReminderWeekly = "blogging-reminder-weekly"
+        case weeklyRoundup          = "weekly-roundup"
+        case bloggingPrompt         = "blogging-prompt"
 
         var actions: [NoteActionDefinition] {
             switch self {
@@ -316,6 +434,14 @@ private extension InteractiveNotificationsManager {
                 return [.shareEditPost]
             case .shareUploadFailure:
                 return []
+            case .login:
+                return [.approveLogin, .denyLogin]
+            case .bloggingReminderWeekly:
+                return []
+            case .weeklyRoundup:
+                return []
+            case .bloggingPrompt:
+                return [.answerPrompt, .dismissPrompt]
             }
         }
 
@@ -327,16 +453,25 @@ private extension InteractiveNotificationsManager {
             return NoteCategoryDefinition.localDefinitions.contains(self)
         }
 
+        var notificationCategoryOptions: [UNNotificationCategoryOptions] {
+            switch self {
+            case .bloggingPrompt:
+                return [.customDismissAction]
+            default:
+                return []
+            }
+        }
+
         func notificationCategory() -> UNNotificationCategory {
             return UNNotificationCategory(
                 identifier: identifier,
                 actions: actions.map({ $0.notificationAction() }),
                 intentIdentifiers: [],
-                options: [])
+                options: UNNotificationCategoryOptions())
         }
 
-        static var allDefinitions = [commentApprove, commentLike, commentReply, commentReplyWithLike, mediaUploadSuccess, mediaUploadFailure, postUploadSuccess, postUploadFailure, shareUploadSuccess, shareUploadFailure]
-        static var localDefinitions = [mediaUploadSuccess, mediaUploadFailure, postUploadSuccess, postUploadFailure, shareUploadSuccess, shareUploadFailure]
+        static var allDefinitions = [commentApprove, commentLike, commentReply, commentReplyWithLike, mediaUploadSuccess, mediaUploadFailure, postUploadSuccess, postUploadFailure, shareUploadSuccess, shareUploadFailure, login, bloggingReminderWeekly, bloggingPrompt]
+        static var localDefinitions = [mediaUploadSuccess, mediaUploadFailure, postUploadSuccess, postUploadFailure, shareUploadSuccess, shareUploadFailure, bloggingReminderWeekly, weeklyRoundup, bloggingPrompt]
     }
 
 
@@ -352,6 +487,10 @@ private extension InteractiveNotificationsManager {
         case postRetry        = "POST_RETRY"
         case postView         = "POST_VIEW"
         case shareEditPost    = "SHARE_EDIT_POST"
+        case approveLogin     = "APPROVE_LOGIN_ATTEMPT"
+        case denyLogin        = "DENY_LOGIN_ATTEMPT"
+        case answerPrompt     = "ANSWER_BLOGGING_PROMPT"
+        case dismissPrompt    = "DISMISS_BLOGGING_PROMPT"
 
         var description: String {
             switch self {
@@ -371,6 +510,18 @@ private extension InteractiveNotificationsManager {
                 return NSLocalizedString("View", comment: "Opens the post epilogue screen to allow sharing / viewing of a post.")
             case .shareEditPost:
                 return NSLocalizedString("Edit Post", comment: "Opens the editor to edit an existing post.")
+            case .approveLogin:
+                return NSLocalizedString("Approve", comment: "Verb. Approves a 2fa authentication challenge, and logs in a user.")
+            case .denyLogin:
+                return NSLocalizedString("Deny", comment: "Verb. Denies a 2fa authentication challenge.")
+            case .answerPrompt:
+                return NSLocalizedString("Answer", comment: "Verb. Opens the editor to answer the blogging prompt.")
+            case .dismissPrompt:
+                return NSLocalizedString(
+                    "bloggingPrompt.pushNotification.customActionDescription.dismiss",
+                    value: "Dismiss",
+                    comment: "Verb. Dismisses the blogging prompt notification."
+                )
             }
         }
 
@@ -383,12 +534,17 @@ private extension InteractiveNotificationsManager {
         }
 
         var requiresAuthentication: Bool {
-            return false
+            switch self {
+            case .approveLogin, .denyLogin:
+                return true
+            default:
+                return false
+            }
         }
 
         var requiresForeground: Bool {
             switch self {
-            case .mediaWritePost, .mediaRetry, .postView, .shareEditPost:
+            case .mediaWritePost, .mediaRetry, .postView, .shareEditPost, .answerPrompt:
                 return true
             default: return false
             }
@@ -438,7 +594,7 @@ private extension InteractiveNotificationsManager {
             }
         }
 
-        static var allDefinitions = [commentApprove, commentLike, commentReply, mediaWritePost, mediaRetry, postRetry, postView, shareEditPost]
+        static var allDefinitions = [commentApprove, commentLike, commentReply, mediaWritePost, mediaRetry, postRetry, postView, shareEditPost, approveLogin, denyLogin, answerPrompt, dismissPrompt]
     }
 }
 
@@ -454,6 +610,20 @@ extension InteractiveNotificationsManager: UNUserNotificationCenterDelegate {
         // If the app is open, and a Zendesk view is being shown, Zendesk will display an alert allowing the user to view the updated ticket.
         handleZendeskNotification(userInfo: userInfo)
 
+        // Otherwise see if it's an auth notification
+        if PushNotificationsManager.shared.handleAuthenticationNotification(userInfo, userInteraction: true, completionHandler: nil) {
+            return
+        }
+
+        // If it's a blogging reminder notification, display it in-app
+        if notification.request.content.categoryIdentifier == NoteCategoryDefinition.bloggingReminderWeekly.rawValue
+            || notification.request.content.categoryIdentifier == NoteCategoryDefinition.weeklyRoundup.rawValue {
+
+            completionHandler([.banner, .list, .sound])
+            return
+        }
+
+        // Otherwise a share notification
         let category = notification.request.content.categoryIdentifier
 
         guard (category == ShareNoticeConstants.categorySuccessIdentifier || category == ShareNoticeConstants.categoryFailureIdentifier),
@@ -485,6 +655,7 @@ extension InteractiveNotificationsManager: UNUserNotificationCenterDelegate {
 
         if handleAction(with: response.actionIdentifier,
                         category: response.notification.request.content.categoryIdentifier,
+                        threadId: response.notification.request.content.threadIdentifier,
                         userInfo: userInfo,
                         responseText: textInputResponse?.userText) {
             completionHandler()
@@ -504,12 +675,20 @@ extension InteractiveNotificationsManager: UNUserNotificationCenterDelegate {
         //  -   Nuke `PushNotificationsManager`
         //
         //
-        PushNotificationsManager.shared.handleNotification(userInfo) { _ in
+        PushNotificationsManager.shared.handleNotification(userInfo, userInteraction: true) { _ in
             completionHandler()
         }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, openSettingsFor notification: UNNotification?) {
-        MeNavigationAction.notificationSettings.perform()
+        MeNavigationAction.notificationSettings.perform(router: UniversalLinkRouter.shared)
+    }
+}
+
+private extension InteractiveNotificationsManager {
+    /// A temporary setting to allow controlling WordPress notifications when they are disabled after Jetpack installation
+    /// Disable WordPress notifications when they are enabled on Jetpack
+    func disableWordPressNotificationsIfNeeded() {
+        JetpackNotificationMigrationService.shared.disableWordPressNotificationsFromJetpack()
     }
 }

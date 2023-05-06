@@ -3,13 +3,14 @@ import XCTest
 
 @testable import WordPress
 
-class PostCardCellGhostableTests: XCTestCase {
+class PostCardCellGhostableTests: CoreDataTestCase {
 
     var postCell: PostCardCell!
 
     override func setUp() {
         postCell = postCellFromNib()
         postCell.ghostAnimationWillStart()
+        super.setUp()
     }
 
     func testHideFeaturedImage() {
@@ -57,7 +58,7 @@ class PostCardCellGhostableTests: XCTestCase {
     }
 
     func testIsInteractiveAfterAConfigure() {
-        let post = PostBuilder().build()
+        let post = PostBuilder(mainContext).build()
 
         postCell.configure(with: post)
 
@@ -65,7 +66,7 @@ class PostCardCellGhostableTests: XCTestCase {
     }
 
     func testVerticalContentSpacingAfterConfigure() {
-        let post = PostBuilder().build()
+        let post = PostBuilder(mainContext).build()
 
         postCell.configure(with: post)
 
@@ -73,15 +74,15 @@ class PostCardCellGhostableTests: XCTestCase {
     }
 
     func testActionBarOpacityAfterConfigure() {
-        let post = PostBuilder().build()
-
+        let post = PostBuilder(mainContext).build()
+        assert(post.managedObjectContext != nil)
         postCell.configure(with: post)
 
         XCTAssertEqual(postCell.actionBarView.layer.opacity, 1)
     }
 
     func testHideGhostView() {
-        let post = PostBuilder().build()
+        let post = PostBuilder(mainContext).build()
 
         postCell.configure(with: post)
 

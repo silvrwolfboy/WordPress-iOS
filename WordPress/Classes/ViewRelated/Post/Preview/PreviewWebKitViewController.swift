@@ -1,10 +1,11 @@
 import Gridicons
 import WebKit
+import WordPressShared
 
 /// An augmentation of WebKitViewController to provide Previewing for different devices
 class PreviewWebKitViewController: WebKitViewController {
 
-    let post: AbstractPost
+    let post: AbstractPost?
 
     private let canPublish: Bool
 
@@ -13,13 +14,11 @@ class PreviewWebKitViewController: WebKitViewController {
     private var selectedDevice: PreviewDeviceSelectionViewController.PreviewDevice = .default {
         didSet {
             if selectedDevice != oldValue {
-                switch selectedDevice {
-                case .mobile:
-                    setWidth(Constants.mobilePreviewWidth)
-                default:
-                    setWidth(nil)
-                }
-                webView.reload()
+                UIView.animate(withDuration: 0.2, animations: {
+                    self.webView.alpha = 0
+                }, completion: { _ in
+                    self.webView.reload()
+                })
             }
             showLabel(device: selectedDevice)
         }
@@ -53,7 +52,7 @@ class PreviewWebKitViewController: WebKitViewController {
     /// - Parameters:
     ///   - post: The post to use for generating the preview URL and authenticating to the blog. **NOTE**: `previewURL` will be used as the URL instead, when available.
     ///   - previewURL: The URL to display in the preview web view.
-    init(post: AbstractPost, previewURL: URL? = nil) {
+    init(post: AbstractPost, previewURL: URL? = nil, source: String) {
 
         self.post = post
 
@@ -70,9 +69,24 @@ class PreviewWebKitViewController: WebKitViewController {
         let isPage = post is Page
 
         let configuration = WebViewControllerConfiguration(url: url)
-        configuration.linkBehavior = isPage ? .hostOnly(url) : .urlOnly(url)
+
+        /// When the counterpart app is installed, revert to the default link behavior from `WebKitViewController`
+        /// to prevent links from being opened through the `externalLinkHandler`.
+        ///
+        /// This can be removed once the universal link routes for the WP app is removed.
+        if !MigrationAppDetection.isCounterpartAppInstalled {
+            configuration.linkBehavior = isPage ? .hostOnly(url) : .urlOnly(url)
+        }
+
         configuration.opensNewInSafari = true
         configuration.authenticate(blog: post.blog)
+        configuration.analyticsSource = source
+        super.init(configuration: configuration)
+    }
+
+    @objc override init(configuration: WebViewControllerConfiguration) {
+        post = nil
+        canPublish = false
         super.init(configuration: configuration)
     }
 
@@ -81,6 +95,8 @@ class PreviewWebKitViewController: WebKitViewController {
     }
 
     func trackOpenEvent() {
+        guard let post = post else { return }
+
         let eventProperties: [String: Any] = [
             "post_type": post.analyticsPostType ?? "unsupported",
             "blog_type": post.blog.analyticsType.rawValue
@@ -89,11 +105,18 @@ class PreviewWebKitViewController: WebKitViewController {
     }
 
     override func viewDidLoad() {
+        webView.alpha = 0
+
         super.viewDidLoad()
         if webView.url?.absoluteString == Constants.blankURL?.absoluteString {
             showNoResults(withTitle: Constants.noPreviewTitle)
         }
         setupDeviceLabel()
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        setWidth(selectedDevice.width, viewWidth: size.width)
     }
 
     // MARK: Toolbar Items
@@ -120,8 +143,12 @@ class PreviewWebKitViewController: WebKitViewController {
                 space,
                 shareButton,
                 space,
-                safariButton
+                safariButton,
+                space,
+                previewButton
             ]
+        case .withBaseURLOnly:
+            fallthrough
         case .hostOnly:
             if canPublish {
                 items = [
@@ -168,7 +195,8 @@ class PreviewWebKitViewController: WebKitViewController {
 
         alertController.addCancelActionWithTitle(cancelTitle)
         alertController.addDefaultActionWithTitle(publishTitle) { [unowned self] _ in
-            PostCoordinator.shared.publish(self.post)
+            guard let post = self.post else { return }
+            PostCoordinator.shared.publish(post)
 
             if let editorVC = (self.presentingViewController?.presentingViewController as? EditPostViewController) {
                 editorVC.closeEditor(true, showPostEpilogue: false, from: self)
@@ -183,8 +211,14 @@ class PreviewWebKitViewController: WebKitViewController {
     @objc private func previewButtonPressed(_ sender: UIBarButtonItem) {
         let popoverContentController = PreviewDeviceSelectionViewController()
         popoverContentController.selectedOption = selectedDevice
-        popoverContentController.dismissHandler = { [weak self] option in
+        popoverContentController.onDeviceChange = { [weak self] option in
             self?.selectedDevice = option
+
+            let properties: [AnyHashable: Any] = [
+                "source": self?.analyticsSource ?? "unknown",
+                "option": option.rawValue
+            ]
+            WPAnalytics.track(.previewWebKitViewDeviceChanged, properties: properties)
         }
 
         popoverContentController.modalPresentationStyle = .popover
@@ -228,17 +262,13 @@ class PreviewWebKitViewController: WebKitViewController {
 
         static let deviceLabelBackgroundColor = UIColor.text.withAlphaComponent(0.8)
 
-        static let devicePickerPopoverOffset: (CGFloat, CGFloat) = (x: -36, y: -2)
-
         static let noPreviewTitle = NSLocalizedString("No Preview URL available", comment: "missing preview URL for blog post preview")
 
         static let publishButtonTitle = NSLocalizedString("Publish", comment: "Label for the publish (verb) button. Tapping publishes a draft post.")
 
-        static let publishButtonColor = UIColor.muriel(color: MurielColor.accent)
+        static let publishButtonColor = UIColor.primary
 
         static let blankURL = URL(string: "about:blank")
-
-        static let mobilePreviewWidth: CGFloat = 460
     }
 }
 
@@ -247,15 +277,13 @@ class PreviewWebKitViewController: WebKitViewController {
 extension PreviewWebKitViewController {
 
     override func prepareForPopoverPresentation(_ popoverPresentationController: UIPopoverPresentationController) {
-        guard let navigationController = navigationController, popoverPresentationController.presentedViewController is PreviewDeviceSelectionViewController else {
+        guard popoverPresentationController.presentedViewController is PreviewDeviceSelectionViewController else {
             super.prepareForPopoverPresentation(popoverPresentationController)
             return
         }
 
         popoverPresentationController.permittedArrowDirections = .down
-
-        popoverPresentationController.sourceRect = sourceRect(for: navigationController.toolbar, offsetBy: Constants.devicePickerPopoverOffset)
-        popoverPresentationController.sourceView = navigationController.toolbar.superview
+        popoverPresentationController.barButtonItem = previewButton
     }
 
     func adaptivePresentationStyle(for controller: UIPresentationController, traitCollection: UITraitCollection) -> UIModalPresentationStyle {
@@ -265,28 +293,11 @@ extension PreviewWebKitViewController {
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
 
-        // Reset our source rect and view for a transition to a new size
-        guard let navigationController = navigationController,
-            let popoverPresentationController = presentedViewController?.presentationController as? UIPopoverPresentationController,
-            popoverPresentationController.presentedViewController is PreviewDeviceSelectionViewController else {
+        guard let popoverPresentationController = presentedViewController?.presentationController as? UIPopoverPresentationController else {
                 return
         }
 
-        popoverPresentationController.sourceRect = sourceRect(for: navigationController.toolbar, offsetBy: Constants.devicePickerPopoverOffset)
-        popoverPresentationController.sourceView = navigationController.toolbar.superview
-    }
-
-    /// Returns a rect that represents the far right corner of `view` offset by `offsetBy`.
-    /// - Parameter view: The view to use for finding the upper right corner.
-    /// - Parameter offsetBy: An x, y pair to offset the view's coordinates by
-    func sourceRect(for view: UIView, offsetBy offset: (x: CGFloat, y: CGFloat)) -> CGRect {
-        return CGRect(origin: view.frame.topRightVertex, size: .zero).offsetBy(dx: offset.x, dy: offset.y)
-    }
-}
-
-private extension CGRect {
-    var topRightVertex: CGPoint {
-        return CGPoint(x: maxX, y: minY)
+        prepareForPopoverPresentation(popoverPresentationController)
     }
 }
 
@@ -294,9 +305,13 @@ private extension CGRect {
 
 extension PreviewWebKitViewController {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        if selectedDevice == .desktop {
-            // Change the viewport scale to match a desktop environment
-            webView.evaluateJavaScript("let parent = document.querySelector('meta[name=viewport]'); parent.setAttribute('content','initial-scale=0');", completionHandler: nil)
+        setWidth(selectedDevice.width)
+        webView.evaluateJavaScript(selectedDevice.viewportScript, completionHandler: nil)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        UIView.animate(withDuration: 0.2) {
+            self.webView.alpha = 1
         }
     }
 }

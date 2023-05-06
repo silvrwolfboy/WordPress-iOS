@@ -8,7 +8,7 @@
  */
 @interface WPLogger : NSObject
 
-@property (nonatomic, strong, readonly) DDFileLogger *fileLogger;
+@property (nonatomic, strong, readonly) DDFileLogger * _Nonnull fileLogger;
 
 #pragma mark - Reading from the log
 
@@ -19,8 +19,23 @@
  *
  *  @returns    The requested log data.
  */
-- (NSString *)getLogFilesContentWithMaxSize:(NSInteger)maxSize;
+- (NSString * _Nonnull)getLogFilesContentWithMaxSize:(NSInteger)maxSize;
 
 + (void)configureLoggerLevelWithExtraDebug;
+
+/**
+ * @brief A shared instance that can be called from anywhere
+ */
++ (WPLogger * _Nonnull)shared;
+
+/**
+ * @brief Deletes all the logs from the device
+ */
+- (void)deleteAllLogs;
+
+/**
+ * @brief Deletes all the old archived logs from the device
+ */
+- (void)deleteArchivedLogs;
 
 @end

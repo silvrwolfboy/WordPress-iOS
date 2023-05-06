@@ -20,21 +20,49 @@ import Gridicons
             case .sites: return NSLocalizedString("Sites", comment: "Title of a Reader tab showing Sites matching a user's search query")
             }
         }
+
+        var trackingValue: String {
+            switch self {
+            case .posts: return "posts"
+            case .sites: return "sites"
+            }
+        }
+    }
+
+    private enum SearchSource: String {
+        case userInput = "user_input"
+        case searchHistory = "search_history"
     }
 
     // MARK: - Properties
 
     @IBOutlet fileprivate weak var searchBar: UISearchBar!
     @IBOutlet fileprivate weak var filterBar: FilterTabBar!
-    @IBOutlet fileprivate weak var label: UILabel!
 
     fileprivate var backgroundTapRecognizer: UITapGestureRecognizer!
     fileprivate var streamController: ReaderStreamViewController?
-    fileprivate var siteSearchController = ReaderSiteSearchViewController()
+    fileprivate lazy var jpSiteSearchController = JetpackBannerWrapperViewController(
+        childVC: ReaderSiteSearchViewController(),
+        screen: .readerSearch
+    )
+    fileprivate var siteSearchController: ReaderSiteSearchViewController? {
+        return jpSiteSearchController.childVC as? ReaderSiteSearchViewController
+    }
     fileprivate let searchBarSearchIconSize = CGFloat(13.0)
     fileprivate var suggestionsController: ReaderSearchSuggestionsViewController?
     fileprivate var restoredSearchTopic: ReaderSearchTopic?
     fileprivate var didBumpStats = false
+
+    private lazy var bannerView: JetpackBannerView = {
+        let textProvider = JetpackBrandingTextProvider(screen: JetpackBannerScreen.readerSearch)
+        let bannerView = JetpackBannerView()
+        bannerView.configure(title: textProvider.brandingText()) { [unowned self] in
+            JetpackBrandingCoordinator.presentOverlay(from: self)
+            JetpackBrandingAnalyticsHelper.trackJetpackPoweredBannerTapped(screen: .readerSearch)
+        }
+        bannerView.frame = CGRect(x: 0, y: 0, width: view.frame.width, height: JetpackBannerView.minimumHeight)
+        return bannerView
+    }()
 
 
     fileprivate let sections: [Section] = [ .posts, .sites ]
@@ -49,6 +77,14 @@ import Gridicons
         return controller
     }
 
+    @objc open class func controller(withSearchText searchText: String) -> ReaderSearchViewController {
+        let controller = controller()
+        controller.loadViewIfNeeded()
+        controller.searchBar.searchTextField.text = searchText
+        controller.performSearch()
+        return controller
+    }
+
 
     // MARK: - State Restoration
 
@@ -59,9 +95,7 @@ import Gridicons
             return ReaderSearchViewController.controller()
         }
 
-        let context = ContextManager.sharedInstance().mainContext
-        let service = ReaderTopicService(managedObjectContext: context)
-        guard let topic = service.find(withPath: path) as? ReaderSearchTopic else {
+        guard let topic = try? ReaderAbstractTopic.lookup(withPath: path, in: ContextManager.shared.mainContext) as? ReaderSearchTopic else {
             return ReaderSearchViewController.controller()
         }
 
@@ -99,11 +133,11 @@ import Gridicons
         super.viewDidLoad()
 
         navigationItem.title = NSLocalizedString("Search", comment: "Title of the Reader's search feature")
+        navigationItem.largeTitleDisplayMode = .never
 
         WPStyleGuide.configureColors(view: view, tableView: nil)
         setupSearchBar()
         configureFilterBar()
-        configureLabel()
         configureBackgroundTapRecognizer()
         configureForRestoredTopic()
         configureSiteSearchViewController()
@@ -117,8 +151,7 @@ import Gridicons
         }
         // When the parent is nil then we've been removed from the nav stack.
         // Clean up any search topics at this point.
-        let context = ContextManager.sharedInstance().mainContext
-        ReaderTopicService(managedObjectContext: context).deleteAllSearchTopics()
+        ReaderTopicService(coreDataStack: ContextManager.shared).deleteAllSearchTopics()
     }
 
 
@@ -147,6 +180,7 @@ import Gridicons
         if didBumpStats {
             return
         }
+
         WPAppAnalytics.track(.readerSearchLoaded)
         didBumpStats = true
     }
@@ -155,16 +189,32 @@ import Gridicons
     // MARK: - Configuration
 
 
-    @objc func setupSearchBar() {
+    private func setupSearchBar() {
         // Appearance must be set before the search bar is added to the view hierarchy.
         let placeholderText = NSLocalizedString("Search WordPress", comment: "Placeholder text for the Reader search feature.")
-        let attributes = WPStyleGuide.defaultSearchBarTextAttributesSwifted(.neutral(.shade30))
-        let attributedPlaceholder = NSAttributedString(string: placeholderText, attributes: attributes)
-        UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self, ReaderSearchViewController.self]).attributedPlaceholder = attributedPlaceholder
-        let textAttributes = WPStyleGuide.defaultSearchBarTextAttributesSwifted(.neutral(.shade60))
-        UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self, ReaderSearchViewController.self]).defaultTextAttributes = textAttributes
+        UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self, ReaderSearchViewController.self]).placeholder = placeholderText
 
+        searchBar.becomeFirstResponder()
         WPStyleGuide.configureSearchBar(searchBar)
+        guard JetpackBrandingVisibility.all.enabled else {
+            return
+        }
+        searchBar.inputAccessoryView = bannerView
+        hideBannerViewIfNeeded()
+    }
+
+    /// hides the Jetpack powered banner on iPhone landscape
+    private func hideBannerViewIfNeeded() {
+        guard JetpackBrandingVisibility.all.enabled else {
+            return
+        }
+        // hide the banner on iPhone landscape
+        bannerView.isHidden = traitCollection.verticalSizeClass == .compact
+    }
+
+    open override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        hideBannerViewIfNeeded()
     }
 
     func configureFilterBar() {
@@ -175,15 +225,6 @@ import Gridicons
 
         filterBar.addTarget(self, action: #selector(selectedFilterDidChange(_:)), for: .valueChanged)
     }
-
-    @objc func configureLabel() {
-        let text = NSLocalizedString("Search WordPress\nfor a site or post", comment: "A short message that is a call to action for the Reader's Search feature.")
-        let rawAttributes = WPNUXUtility.titleAttributes(with: .neutral(.shade50)) as! [String: Any]
-        let swiftedAttributes = NSAttributedString.Key.convertFromRaw(attributes: rawAttributes)
-        label.numberOfLines = 2
-        label.attributedText = NSAttributedString(string: text, attributes: swiftedAttributes)
-    }
-
 
     @objc func configureBackgroundTapRecognizer() {
         backgroundTapRecognizer = UITapGestureRecognizer(target: self, action: #selector(ReaderSearchViewController.handleBackgroundTap(_:)))
@@ -198,31 +239,30 @@ import Gridicons
         guard let topic = restoredSearchTopic else {
             return
         }
-        label.isHidden = true
         searchBar.text = topic.title
         streamController?.readerTopic = topic
     }
 
     private func configureSiteSearchViewController() {
-        siteSearchController.view.translatesAutoresizingMaskIntoConstraints = false
+        jpSiteSearchController.view.translatesAutoresizingMaskIntoConstraints = false
 
-        addChild(siteSearchController)
+        addChild(jpSiteSearchController)
 
-        view.addSubview(siteSearchController.view)
+        view.addSubview(jpSiteSearchController.view)
         NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: siteSearchController.view.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: siteSearchController.view.trailingAnchor),
-            filterBar.bottomAnchor.constraint(equalTo: siteSearchController.view.topAnchor),
-            view.bottomAnchor.constraint(equalTo: siteSearchController.view.bottomAnchor),
+            view.leadingAnchor.constraint(equalTo: jpSiteSearchController.view.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: jpSiteSearchController.view.trailingAnchor),
+            filterBar.bottomAnchor.constraint(equalTo: jpSiteSearchController.view.topAnchor),
+            view.bottomAnchor.constraint(equalTo: jpSiteSearchController.view.bottomAnchor),
             ])
 
-        siteSearchController.didMove(toParent: self)
+        jpSiteSearchController.didMove(toParent: self)
 
         if let topic = restoredSearchTopic {
-            siteSearchController.searchQuery = topic.title
+            siteSearchController?.searchQuery = topic.title
         }
 
-        siteSearchController.view.isHidden = true
+        jpSiteSearchController.view.isHidden = true
     }
 
     // MARK: - Actions
@@ -236,13 +276,24 @@ import Gridicons
     /// Constructs a ReaderSearchTopic from the search phrase and sets the
     /// embedded stream to the topic.
     ///
-    @objc func performSearch() {
+    private func performSearch(source: SearchSource = .userInput) {
         guard let phrase = searchBar.text?.trim(), !phrase.isEmpty else {
             return
         }
 
         performPostsSearch(for: phrase)
         performSitesSearch(for: phrase)
+        trackSearchPerformed(source: source)
+    }
+
+    private func trackSearchPerformed(source: SearchSource) {
+        let selectedTab: Section = Section(rawValue: filterBar.selectedIndex) ?? .posts
+        let properties: [AnyHashable: Any] = [
+            "source": source.rawValue,
+            "type": selectedTab.trackingValue
+        ]
+
+        WPAppAnalytics.track(.readerSearchPerformed, withProperties: properties)
     }
 
     private func performPostsSearch(for phrase: String) {
@@ -252,24 +303,25 @@ import Gridicons
 
         let previousTopic = streamController.readerTopic
 
-        let context = ContextManager.sharedInstance().mainContext
-        let service = ReaderTopicService(managedObjectContext: context)
+        let service = ReaderTopicService(coreDataStack: ContextManager.shared)
+        service.createSearchTopic(forSearchPhrase: phrase) { topicID in
+            assert(Thread.isMainThread)
+            self.endSearch()
 
-        let topic = service.searchTopic(forSearchPhrase: phrase)
-        streamController.readerTopic = topic
-        WPAppAnalytics.track(.readerSearchPerformed)
+            guard let topicID, let topic = try? ContextManager.shared.mainContext.existingObject(with: topicID) as? ReaderAbstractTopic else {
+                DDLogError("Failed to create a search topic")
+                return
+            }
+            streamController.readerTopic = topic
 
-        // Hide the starting label now that a topic has been set.
-        label.isHidden = true
-        endSearch()
-
-        if let previousTopic = previousTopic {
-            service.delete(previousTopic)
+            if let previousTopic, topic != previousTopic {
+                service.delete(previousTopic)
+            }
         }
     }
 
     private func performSitesSearch(for query: String) {
-        siteSearchController.searchQuery = query
+        siteSearchController?.searchQuery = query
     }
 
 
@@ -283,10 +335,10 @@ import Gridicons
         switch section {
         case .posts:
             streamController?.view.isHidden = false
-            siteSearchController.view.isHidden = true
+            jpSiteSearchController.view.isHidden = true
         case .sites:
             streamController?.view.isHidden = true
-            siteSearchController.view.isHidden = false
+            jpSiteSearchController.view.isHidden = false
         }
     }
 
@@ -411,7 +463,7 @@ extension ReaderSearchViewController: ReaderSearchSuggestionsDelegate {
 
     @objc func searchSuggestionsController(_ controller: ReaderSearchSuggestionsViewController, selectedItem: String) {
         searchBar.text = selectedItem
-        performSearch()
+        performSearch(source: .searchHistory)
     }
 
 }

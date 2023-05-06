@@ -1,80 +1,93 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="14490.70" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" colorMatched="YES" initialViewController="doV-5W-Rtg">
-    <device id="retina4_7" orientation="portrait">
-        <adaptation id="fullscreen"/>
-    </device>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="21225" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" colorMatched="YES" initialViewController="aRr-Yu-ntD">
+    <device id="retina4_7" orientation="portrait" appearance="light"/>
     <dependencies>
         <deployment identifier="iOS"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="14490.49"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="21207"/>
+        <capability name="System colors in document resources" minToolsVersion="11.0"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
         <!--Notifications View Controller-->
-        <scene sceneID="CAK-Wk-k64">
+        <scene sceneID="30e-Wx-jwX">
             <objects>
-                <tableViewController storyboardIdentifier="NotificationsViewController" useStoryboardIdentifierAsRestorationIdentifier="YES" id="doV-5W-Rtg" customClass="NotificationsViewController" customModule="WordPress" sceneMemberID="viewController">
-                    <tableView key="view" opaque="NO" clipsSubviews="YES" clearsContextBeforeDrawing="NO" contentMode="scaleToFill" alwaysBounceVertical="YES" dataMode="prototypes" style="plain" separatorStyle="none" rowHeight="44" sectionHeaderHeight="28" sectionFooterHeight="28" id="XCV-Uv-qac">
+                <viewController storyboardIdentifier="NotificationsViewController" extendedLayoutIncludesOpaqueBars="YES" id="aRr-Yu-ntD" customClass="NotificationsViewController" customModule="WordPress" customModuleProvider="target" sceneMemberID="viewController">
+                    <layoutGuides>
+                        <viewControllerLayoutGuide type="top" id="6eI-Lt-Q4C"/>
+                        <viewControllerLayoutGuide type="bottom" id="X8S-C3-Z2w"/>
+                    </layoutGuides>
+                    <view key="view" contentMode="scaleToFill" id="TcG-d5-FzX">
                         <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
-                        <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                        <inset key="separatorInset" minX="12" minY="0.0" maxX="0.0" maxY="0.0"/>
-                        <connections>
-                            <outlet property="dataSource" destination="doV-5W-Rtg" id="rEG-tS-Iui"/>
-                            <outlet property="delegate" destination="doV-5W-Rtg" id="Owq-LQ-4wG"/>
-                        </connections>
-                    </tableView>
+                        <subviews>
+                            <stackView opaque="NO" contentMode="scaleToFill" axis="vertical" translatesAutoresizingMaskIntoConstraints="NO" id="a0S-nk-6Lg">
+                                <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
+                                <subviews>
+                                    <tableView opaque="NO" clipsSubviews="YES" clearsContextBeforeDrawing="NO" contentMode="scaleToFill" alwaysBounceVertical="YES" dataMode="prototypes" style="plain" separatorStyle="default" rowHeight="44" sectionHeaderHeight="28" sectionFooterHeight="28" id="vdx-hy-x4l">
+                                        <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                        <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                                        <inset key="separatorInset" minX="12" minY="0.0" maxX="0.0" maxY="0.0"/>
+                                    </tableView>
+                                    <view hidden="YES" contentMode="scaleToFill" verticalHuggingPriority="750" id="fx7-Fo-KUl" customClass="JetpackBannerView" customModule="WordPress" customModuleProvider="target">
+                                        <rect key="frame" x="0.0" y="667" width="375" height="0.0"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                        <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                                    </view>
+                                </subviews>
+                            </stackView>
+                        </subviews>
+                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                        <constraints>
+                            <constraint firstAttribute="trailing" secondItem="a0S-nk-6Lg" secondAttribute="trailing" id="1pV-6w-3ye"/>
+                            <constraint firstItem="a0S-nk-6Lg" firstAttribute="top" secondItem="TcG-d5-FzX" secondAttribute="top" id="9mC-4L-0ob"/>
+                            <constraint firstAttribute="bottom" secondItem="a0S-nk-6Lg" secondAttribute="bottom" id="G65-sR-kE3"/>
+                            <constraint firstItem="a0S-nk-6Lg" firstAttribute="leading" secondItem="TcG-d5-FzX" secondAttribute="leading" id="ctz-Ij-aHv"/>
+                        </constraints>
+                    </view>
+                    <extendedEdge key="edgesForExtendedLayout" top="YES"/>
                     <connections>
-                        <outlet property="filterTabBar" destination="LBU-zb-iai" id="qqB-Tp-xXt"/>
-                        <outlet property="inlinePromptSpaceConstraint" destination="MBK-Ez-h7B" id="NJj-XL-4AG"/>
-                        <outlet property="inlinePromptView" destination="ZnY-3K-upT" id="lUG-fd-Stc"/>
-                        <outlet property="tableHeaderView" destination="Uvo-9e-l6I" id="dxx-mK-msp"/>
-                        <segue destination="veA-Pg-QAw" kind="showDetail" identifier="NotificationDetailsViewController" id="qci-jy-59F"/>
+                        <outlet property="filterTabBar" destination="XgY-0j-kFz" id="LlQ-Kc-Yyz"/>
+                        <outlet property="inlinePromptView" destination="jc0-PX-EvN" id="yPU-Nj-hlp"/>
+                        <outlet property="jetpackBannerView" destination="fx7-Fo-KUl" id="YYv-mK-dV3"/>
+                        <outlet property="tableHeaderView" destination="9K7-oU-83Y" id="dac-fs-2oN"/>
+                        <outlet property="tableView" destination="vdx-hy-x4l" id="fyJ-yE-QCH"/>
+                        <segue destination="veA-Pg-QAw" kind="showDetail" identifier="NotificationDetailsViewController" id="yX6-4W-SGq"/>
                     </connections>
-                </tableViewController>
-                <view contentMode="scaleToFill" preservesSuperviewLayoutMargins="YES" layoutMarginsFollowReadableWidth="YES" id="Uvo-9e-l6I" userLabel="Header View">
+                </viewController>
+                <stackView opaque="NO" contentMode="scaleToFill" axis="vertical" distribution="equalSpacing" id="9K7-oU-83Y">
                     <rect key="frame" x="0.0" y="0.0" width="600" height="144"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
                     <subviews>
-                        <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="ZnY-3K-upT" userLabel="Ratings View" customClass="AppFeedbackPromptView" customModule="WordPress" customModuleProvider="target">
+                        <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="jc0-PX-EvN" userLabel="Ratings View" customClass="AppFeedbackPromptView" customModule="WordPress" customModuleProvider="target">
                             <rect key="frame" x="0.0" y="0.0" width="600" height="100"/>
                             <color key="backgroundColor" red="0.0" green="0.0" blue="0.0" alpha="0.0" colorSpace="custom" customColorSpace="sRGB"/>
                             <constraints>
-                                <constraint firstAttribute="height" constant="100" placeholder="YES" id="R1T-Iv-5Q8"/>
+                                <constraint firstAttribute="height" constant="100" placeholder="YES" id="pxu-yE-rHC"/>
                             </constraints>
                         </view>
-                        <view contentMode="scaleToFill" preservesSuperviewLayoutMargins="YES" layoutMarginsFollowReadableWidth="YES" translatesAutoresizingMaskIntoConstraints="NO" id="pEF-oN-cih" userLabel="Filters View">
+                        <view contentMode="scaleToFill" preservesSuperviewLayoutMargins="YES" layoutMarginsFollowReadableWidth="YES" translatesAutoresizingMaskIntoConstraints="NO" id="rKm-gY-cFw" userLabel="Filters View">
                             <rect key="frame" x="0.0" y="100" width="600" height="44"/>
                             <subviews>
-                                <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="LBU-zb-iai" customClass="FilterTabBar" customModule="WordPress" customModuleProvider="target">
-                                    <rect key="frame" x="0.0" y="0.0" width="600" height="44"/>
+                                <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="XgY-0j-kFz" customClass="FilterTabBar" customModule="WordPress" customModuleProvider="target">
+                                    <rect key="frame" x="0.0" y="0.0" width="600" height="34"/>
                                     <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                                 </view>
                             </subviews>
-                            <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                            <color key="backgroundColor" systemColor="systemBackgroundColor"/>
                             <constraints>
-                                <constraint firstAttribute="bottom" secondItem="LBU-zb-iai" secondAttribute="bottom" id="6uy-tW-55g"/>
-                                <constraint firstItem="LBU-zb-iai" firstAttribute="leading" secondItem="pEF-oN-cih" secondAttribute="leading" priority="999" id="9sh-kF-RQv"/>
-                                <constraint firstItem="LBU-zb-iai" firstAttribute="top" secondItem="pEF-oN-cih" secondAttribute="top" id="Ib2-7V-nPZ"/>
-                                <constraint firstAttribute="trailing" secondItem="LBU-zb-iai" secondAttribute="trailing" priority="999" id="Zhl-Rn-WR6"/>
+                                <constraint firstAttribute="trailing" secondItem="XgY-0j-kFz" secondAttribute="trailing" priority="999" id="7Mp-Sv-zuM"/>
+                                <constraint firstItem="XgY-0j-kFz" firstAttribute="leading" secondItem="rKm-gY-cFw" secondAttribute="leading" priority="999" id="JVy-y6-rph"/>
+                                <constraint firstAttribute="height" priority="999" constant="44" id="dte-R2-ISl"/>
+                                <constraint firstAttribute="bottom" secondItem="XgY-0j-kFz" secondAttribute="bottom" constant="10" id="mxz-xp-47Y"/>
+                                <constraint firstItem="XgY-0j-kFz" firstAttribute="top" secondItem="rKm-gY-cFw" secondAttribute="top" id="udW-ag-i42"/>
                             </constraints>
                         </view>
                     </subviews>
-                    <color key="backgroundColor" red="0.0" green="0.0" blue="0.0" alpha="0.0" colorSpace="custom" customColorSpace="sRGB"/>
-                    <constraints>
-                        <constraint firstItem="pEF-oN-cih" firstAttribute="leading" secondItem="Uvo-9e-l6I" secondAttribute="leading" priority="999" identifier="FiltersLeading" id="0TE-M7-WfE"/>
-                        <constraint firstAttribute="trailing" secondItem="pEF-oN-cih" secondAttribute="trailing" priority="999" identifier="FiltersTrailing" id="222-MX-igM"/>
-                        <constraint firstItem="ZnY-3K-upT" firstAttribute="leading" secondItem="Uvo-9e-l6I" secondAttribute="leading" priority="999" identifier="RatingsLeading" id="27p-cV-siE"/>
-                        <constraint firstItem="pEF-oN-cih" firstAttribute="top" secondItem="ZnY-3K-upT" secondAttribute="bottom" identifier="FiltersTop" id="MBK-Ez-h7B"/>
-                        <constraint firstItem="ZnY-3K-upT" firstAttribute="top" secondItem="Uvo-9e-l6I" secondAttribute="top" priority="750" identifier="RatingsTop" id="SJu-PU-nzt"/>
-                        <constraint firstAttribute="trailing" secondItem="ZnY-3K-upT" secondAttribute="trailing" priority="999" identifier="RatingsTrailing" id="b8L-0Q-JCB"/>
-                        <constraint firstItem="pEF-oN-cih" firstAttribute="top" relation="greaterThanOrEqual" secondItem="Uvo-9e-l6I" secondAttribute="top" id="iOI-vG-EsO"/>
-                        <constraint firstItem="pEF-oN-cih" firstAttribute="centerX" secondItem="Uvo-9e-l6I" secondAttribute="centerX" identifier="FiltersCenter" id="rGu-9k-JxJ"/>
-                        <constraint firstAttribute="bottom" secondItem="pEF-oN-cih" secondAttribute="bottom" identifier="FiltersBottom" id="zwD-z0-d6i"/>
-                    </constraints>
-                </view>
-                <placeholder placeholderIdentifier="IBFirstResponder" id="9wK-eg-RBm" userLabel="First Responder" sceneMemberID="firstResponder"/>
+                </stackView>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="KJC-DS-ThZ" userLabel="First Responder" customClass="UIResponder" sceneMemberID="firstResponder"/>
             </objects>
-            <point key="canvasLocation" x="700" y="-1061"/>
+            <point key="canvasLocation" x="372" y="-1061"/>
         </scene>
         <!--Notification Details-->
         <scene sceneID="0B7-mU-JSs">
@@ -85,11 +98,11 @@
                         <viewControllerLayoutGuide type="bottom" id="6LW-NS-qSh"/>
                     </layoutGuides>
                     <view key="view" contentMode="scaleToFill" id="lvM-1n-Dgf">
-                        <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
+                        <rect key="frame" x="0.0" y="0.0" width="375" height="647"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <stackView opaque="NO" contentMode="scaleToFill" axis="vertical" translatesAutoresizingMaskIntoConstraints="NO" id="t2r-NP-ili">
-                                <rect key="frame" x="0.0" y="20" width="375" height="647"/>
+                                <rect key="frame" x="0.0" y="0.0" width="375" height="647"/>
                                 <subviews>
                                     <tableView opaque="NO" clipsSubviews="YES" clearsContextBeforeDrawing="NO" contentMode="scaleToFill" layoutMarginsFollowReadableWidth="YES" alwaysBounceVertical="YES" dataMode="prototypes" style="plain" rowHeight="44" sectionHeaderHeight="28" sectionFooterHeight="28" translatesAutoresizingMaskIntoConstraints="NO" id="Dcn-Il-AtN" customClass="IntrinsicTableView" customModule="WordPress">
                                         <rect key="frame" x="0.0" y="0.0" width="375" height="647"/>
@@ -131,4 +144,9 @@
             <point key="canvasLocation" x="1446" y="-1061"/>
         </scene>
     </scenes>
+    <resources>
+        <systemColor name="systemBackgroundColor">
+            <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+        </systemColor>
+    </resources>
 </document>

@@ -1,3 +1,4 @@
+import AutomatticTracks
 import UIKit
 import Gridicons
 
@@ -39,14 +40,18 @@ class PostCardCell: UITableViewCell, ConfigurablePostView {
     private var currentLoadedFeaturedImage: String?
     private weak var interactivePostViewDelegate: InteractivePostViewDelegate?
     private weak var actionSheetDelegate: PostActionSheetDelegate?
-    var isAuthorHidden: Bool = false {
+    var shouldHideAuthor: Bool = false {
         didSet {
-            authorLabel.isHidden = isAuthorHidden
-            separatorLabel.isHidden = isAuthorHidden
+            let emptyAuthor = viewModel?.author.isEmpty ?? true
+
+            authorLabel.isHidden = shouldHideAuthor || emptyAuthor
+            separatorLabel.isHidden = shouldHideAuthor || emptyAuthor
         }
     }
 
     func configure(with post: Post) {
+        assert(post.managedObjectContext != nil)
+
         if post != self.post {
             viewModel = PostCardStatusViewModel(post: post)
         }
@@ -186,7 +191,7 @@ class PostCardCell: UITableViewCell, ConfigurablePostView {
         }
 
         if let url = post.featuredImageURL,
-            let desiredWidth = UIApplication.shared.keyWindow?.frame.size.width {
+            let desiredWidth = UIApplication.shared.mainWindow?.frame.size.width {
             featuredImageStackView.isHidden = false
             topPadding.constant = Constants.margin
             loadFeaturedImageIfNeeded(url, preferredSize: CGSize(width: desiredWidth, height: featuredImage.frame.height))
@@ -201,9 +206,14 @@ class PostCardCell: UITableViewCell, ConfigurablePostView {
             return
         }
 
+        let host = MediaHost(with: post) { error in
+            // We'll log the error, so we know it's there, but we won't halt execution.
+            WordPressAppDelegate.crashLogging?.logError(error)
+        }
+
         if currentLoadedFeaturedImage != url.absoluteString {
             currentLoadedFeaturedImage = url.absoluteString
-            imageLoader.loadImage(with: url, from: post, preferredSize: preferredSize)
+            imageLoader.loadImage(with: url, from: host, preferredSize: preferredSize)
         }
     }
 
@@ -374,7 +384,7 @@ class PostCardCell: UITableViewCell, ConfigurablePostView {
 
     private func setupLabels() {
         retryButton.setTitle(NSLocalizedString("Retry", comment: "Label for the retry post upload button. Tapping attempts to upload the post again."), for: .normal)
-        retryButton.setImage(Gridicon.iconOfType(.refresh, withSize: CGSize(width: 18, height: 18)), for: .normal)
+        retryButton.setImage(.gridicon(.refresh, size: CGSize(width: 18, height: 18)), for: .normal)
 
         cancelAutoUploadButton.setTitle(NSLocalizedString("Cancel", comment: "Label for the auto-upload cancelation button in the post list. Tapping will prevent the app from auto-uploading the post."),
                                         for: .normal)

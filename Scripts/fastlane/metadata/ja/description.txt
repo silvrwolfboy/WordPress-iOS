@@ -1,9 +1,0 @@
-iOS 端末から WordPress ブログとサイトを管理または作成しましょう。投稿やページの作成と編集、お気に入りの写真と動画のアップロード、統計の表示、コメントへの返信が可能です。
-
-WordPress for iOS を使えばスマートフォンから投稿を公開できます。くつろぎながら、頭に浮かんだ言葉をさっと下書きできます。お昼休みに写真を撮って投稿できます。最新のコメントに返信し、統計情報画面から初アクセスがあった国を確認できます。
-
-WordPress for iOS はオープンソースのプロジェクトですので、誰でも開発に貢献できます。詳しくは https://apps.wordpress.com/contribute/ をご覧ください。
-
-WordPress for iOS は、WordPress.com と、WordPress 4.0以降が稼働するインストール型 WordPress.org のサイトに対応しています。
-
-アプリに関するサポートが必要なときは、https://ios.forums.wordpress.org/ にアクセスするか、@WordPressiOS にツイートしてください。

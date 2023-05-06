@@ -1,32 +1,9 @@
 import UIKit
 
-// MARK: - EnhancedSiteCreationNavigationController
-
-private final class EnhancedSiteCreationNavigationController: UINavigationController {
-    override var shouldAutorotate: Bool {
-        return WPDeviceIdentification.isiPad() ? true : false
-    }
-
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        return WPDeviceIdentification.isiPad() ? .all : .portrait
-    }
-}
-
 // MARK: - WizardNavigation
-
-final class WizardNavigation {
+final class WizardNavigation: UINavigationController {
     private let steps: [WizardStep]
     private let pointer: WizardNavigationPointer
-
-    private lazy var navigationController: UINavigationController? = {
-        guard let root = self.firstContentViewController else {
-            return nil
-        }
-
-        let returnValue = EnhancedSiteCreationNavigationController(rootViewController: root)
-        returnValue.delegate = self.pointer
-        return returnValue
-    }()
 
     private lazy var firstContentViewController: UIViewController? = {
         guard let firstStep = self.steps.first else {
@@ -35,12 +12,36 @@ final class WizardNavigation {
         return firstStep.content
     }()
 
-
     init(steps: [WizardStep]) {
         self.steps = steps
         self.pointer = WizardNavigationPointer(capacity: steps.count)
 
+        guard let firstStep = self.steps.first else {
+            fatalError("Navigation Controller was initialized with no steps.")
+        }
+
+        let root = firstStep.content
+        super.init(rootViewController: root)
+
+        delegate = self.pointer
         configureSteps()
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // Navigation Overrides
+    override var shouldAutorotate: Bool {
+        return WPDeviceIdentification.isiPad() ? true : false
+    }
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        return WPDeviceIdentification.isiPad() ? .all : .portrait
+    }
+
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        return .default
     }
 
     private func configureSteps() {
@@ -48,18 +49,13 @@ final class WizardNavigation {
             step.delegate = self
         }
     }
-
-    lazy var content: UIViewController? = {
-        return self.navigationController
-    }()
 }
 
 extension WizardNavigation: WizardDelegate {
     func nextStep() {
-        guard let navigationController = navigationController, let nextStepIndex = pointer.nextIndex else {
+        guard let nextStepIndex = pointer.nextIndex else {
             // If we find this statement in Fabric, it suggests 11388 might not have been resolved
             DDLogInfo("We've exceeded the max index of our wizard navigation steps (i.e., \(pointer.currentIndex)")
-
             return
         }
 
@@ -67,11 +63,11 @@ extension WizardNavigation: WizardDelegate {
         let nextViewController = nextStep.content
 
         // If we find this statement in Fabric, it's likely that we haven't resolved 11388
-        if navigationController.viewControllers.contains(nextViewController) {
+        if viewControllers.contains(nextViewController) {
             DDLogInfo("Attempting to push \(String(describing: nextViewController.title)) when it's already on the navigation stack!")
         }
 
-        navigationController.pushViewController(nextViewController, animated: true)
+        pushViewController(nextViewController, animated: true)
     }
 }
 

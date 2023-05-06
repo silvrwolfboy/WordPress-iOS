@@ -1,5 +1,5 @@
 #import <Foundation/Foundation.h>
-#import "LocalCoreDataService.h"
+#import "CoreDataService.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -9,22 +9,11 @@ NS_ASSUME_NONNULL_BEGIN
 extern NSString *const WPAccountDefaultWordPressComAccountChangedNotification;
 extern NSNotificationName const WPAccountEmailAndDefaultBlogUpdatedNotification;
 
-@interface AccountService : LocalCoreDataService
+@interface AccountService : CoreDataService
 
 ///------------------------------------
 /// @name Default WordPress.com account
 ///------------------------------------
-
-/**
- Returns the default WordPress.com account
- 
- The default WordPress.com account is the one used for Reader and Notifications
- 
- @return the default WordPress.com account
- @see setDefaultWordPressComAccount:
- @see removeDefaultWordPressComAccount
- */
-- (nullable WPAccount *)defaultWordPressComAccount;
 
 /**
  Sets the default WordPress.com account
@@ -42,11 +31,6 @@ extern NSNotificationName const WPAccountEmailAndDefaultBlogUpdatedNotification;
  @see setDefaultWordPressComAccount:
  */
 - (void)removeDefaultWordPressComAccount;
-
-/**
- Returns if the given account is the default WordPress.com account.
- */
-- (BOOL)isDefaultWordPressComAccount:(WPAccount *)account;
 
 /**
  Query to check if an email address is paired to a wpcom account. Used in the 
@@ -93,35 +77,9 @@ extern NSNotificationName const WPAccountEmailAndDefaultBlogUpdatedNotification;
  
  @param username the WordPress.com account's username
  @param authToken the OAuth2 token returned by signIntoWordPressDotComWithUsername:authToken:
- @return a WordPress.com `WPAccount` object for the given `username`
+ @return The ID of the WordPress.com `WPAccount` object for the given `username`
  */
-- (WPAccount *)createOrUpdateAccountWithUsername:(NSString *)username
-                                       authToken:(NSString *)authToken;
-
-- (NSUInteger)numberOfAccounts;
-
-/**
- Returns all accounts currently existing in core data.
-
- @return An array of WPAccounts.
- */
-- (NSArray<WPAccount *> *)allAccounts;
-
-/**
- Returns a WordPress.com account with the specified username, if it exists
-
- @param username the account's username
- @return a `WPAccount` object if there's one for the specified username. Otherwise it returns nil
- */
-- (nullable WPAccount *)findAccountWithUsername:(NSString *)username;
-
-/**
- Returns a WordPress.com account with the specified user ID, if it exists
-
- @param userID the account's user ID
- @return a `WPAccount` object if there's one for the specified username. Otherwise it returns nil
- */
-- (nullable WPAccount *)findAccountWithUserID:(NSNumber *)userID;
+- (NSManagedObjectID *)createOrUpdateAccountWithUsername:(NSString *)username authToken:(NSString *)authToken;
 
 /**
  Updates user details including username, email, userID, avatarURL, and default blog.
@@ -136,7 +94,7 @@ extern NSNotificationName const WPAccountEmailAndDefaultBlogUpdatedNotification;
  Updates the default blog for the specified account.  The default blog will be the one whose siteID matches
  the accounts primaryBlogID.
  */
-- (void)updateDefaultBlogIfNeeded:(WPAccount *)account;
+- (void)updateDefaultBlogIfNeeded:(WPAccount *)account inContext:(NSManagedObjectContext *)context;
 
 /**
  Syncs the details for the account associated with the provided auth token, then

@@ -5,6 +5,7 @@ enum ReaderRoute {
     case discover
     case search
     case a8c
+    case p2
     case likes
     case manageFollowing
     case list
@@ -13,6 +14,7 @@ enum ReaderRoute {
     case blog
     case feedsPost
     case blogsPost
+    case wpcomPost
 }
 
 extension ReaderRoute: Route {
@@ -26,6 +28,8 @@ extension ReaderRoute: Route {
             return "/read/search"
         case .a8c:
             return "/read/a8c"
+        case .p2:
+            return "/read/p2"
         case .likes:
             return "/activities/likes"
         case .manageFollowing:
@@ -42,28 +46,32 @@ extension ReaderRoute: Route {
             return "/read/feeds/:feed_id/posts/:post_id"
         case .blogsPost:
             return "/read/blogs/:blog_id/posts/:post_id"
+        case .wpcomPost:
+            return "/:post_year/:post_month/:post_day/:post_name"
         }
+    }
+
+    var section: DeepLinkSection? {
+        return .reader
     }
 
     var action: NavigationAction {
         return self
     }
+
+    var jetpackPowered: Bool {
+        return true
+    }
 }
 
 extension ReaderRoute: NavigationAction {
-    func perform(_ values: [String: String], source: UIViewController? = nil) {
-        guard let coordinator = WPTabBarController.sharedInstance().readerCoordinator else {
+    func perform(_ values: [String: String], source: UIViewController? = nil, router: LinkRouter) {
+        guard JetpackFeaturesRemovalCoordinator.jetpackFeaturesEnabled() else {
+            RootViewCoordinator.sharedPresenter.showReaderTab() // Show static reader tab
             return
         }
-
-        coordinator.source = source
-
-        if source == nil {
-            // If we're not navigating internally,
-            // we want to bounce back to Safari on failure
-            coordinator.failureBlock = {
-                self.failAndBounce(values)
-            }
+        guard let coordinator = RootViewCoordinator.sharedPresenter.readerCoordinator else {
+            return
         }
 
         switch self {
@@ -74,7 +82,9 @@ extension ReaderRoute: NavigationAction {
         case .search:
             coordinator.showSearch()
         case .a8c:
-            coordinator.showA8CTeam()
+            coordinator.showA8C()
+        case .p2:
+            coordinator.showP2()
         case .likes:
             coordinator.showMyLikes()
         case .manageFollowing:
@@ -106,6 +116,13 @@ extension ReaderRoute: NavigationAction {
             if let (blogID, postID) = blogAndPostID(from: values) {
                 coordinator.showPost(with: postID, for: blogID, isFeed: false)
             }
+        case .wpcomPost:
+            if let urlString = values[MatchedRouteURLComponentKey.url.rawValue],
+               let url = URL(string: urlString),
+               isValidWpcomUrl(values) {
+
+                coordinator.showPost(with: url)
+            }
         }
     }
 
@@ -129,5 +146,26 @@ extension ReaderRoute: NavigationAction {
         }
 
         return (blogID, postID)
+    }
+
+    private func isValidWpcomUrl(_ values: [String: String]) -> Bool {
+        let year = Int(values["post_year"] ?? "") ?? 0
+        let month = Int(values["post_month"] ?? "") ?? 0
+        let day = Int(values["post_day"] ?? "") ?? 0
+
+        // we assume no posts were made in the 1800's or earlier
+        func isYear(_ year: Int) -> Bool {
+            year > 1900
+        }
+
+        func isMonth(_ month: Int) ->  Bool {
+            (1...12).contains(month)
+        }
+
+        func isDay(_ day: Int) -> Bool {
+            (1...31).contains(day)
+        }
+
+        return isYear(year) && isMonth(month) && isDay(day)
     }
 }

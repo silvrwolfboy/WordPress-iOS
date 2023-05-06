@@ -1,7 +1,8 @@
 #import "PostTagService.h"
 #import "Blog.h"
 #import "PostTag.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
+#import "WordPress-Swift.h"
 @import WordPressKit;
 
 NS_ASSUME_NONNULL_BEGIN

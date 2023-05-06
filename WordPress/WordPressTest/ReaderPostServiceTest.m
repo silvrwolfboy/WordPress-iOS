@@ -1,4 +1,4 @@
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 
 #import <XCTest/XCTest.h>
 
@@ -6,12 +6,12 @@
 #import "ReaderTopicService.h"
 #import "ReaderPost.h"
 #import "ReaderPostService.h"
-#import "TestContextManager.h"
+#import "WordPressTest-Swift.h"
 @import WordPressKit;
 
 @interface ReaderPostService()
 
-- (ReaderPost *)createOrReplaceFromRemotePost:(RemoteReaderPost *)remotePost forTopic:(ReaderAbstractTopic *)topic;
+- (ReaderPost *)createOrReplaceFromRemotePost:(RemoteReaderPost *)remotePost forTopic:(ReaderAbstractTopic *)topic inContext:(NSManagedObjectContext *)context;
 
 @end
 
@@ -29,22 +29,24 @@
     remotePost.content = @"";
     remotePost.postTitle = str;
     remotePost.summary = str;
+    remotePost.organizationID = @0;
+    remotePost.sortRank = @1;
 
     return remotePost;
 }
 
 - (void)testDeletePostsWithoutATopic {
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    ReaderPostService *service = [[ReaderPostService alloc] initWithManagedObjectContext:context];
+    id<CoreDataStack> coreDataStack = [self coreDataStackForTesting];
 
-    RemoteReaderPost *remotePost = [self remoteReaderPostForTests];
-    ReaderPost *post = [service createOrReplaceFromRemotePost:remotePost forTopic:nil];
-    [[ContextManager sharedInstance] saveContext:context];
+    ReaderPostService *service = [[ReaderPostService alloc] initWithCoreDataStack:coreDataStack];
+    [coreDataStack performAndSaveUsingBlock:^(NSManagedObjectContext *context) {
+        RemoteReaderPost *remotePost = [self remoteReaderPostForTests];
+        [service createOrReplaceFromRemotePost:remotePost forTopic:nil inContext:context];
+    }];
 
+    XCTAssertEqual([coreDataStack.mainContext countForFetchRequest:[ReaderPost fetchRequest] error:nil], 1);
     [service deletePostsWithNoTopic];
-    XCTAssertTrue(post.isDeleted, @"The post should have been deleted.");
-
-
+    XCTAssertEqual([coreDataStack.mainContext countForFetchRequest:[ReaderPost fetchRequest] error:nil], 0, @"The post should have been deleted.");
 }
 
 @end

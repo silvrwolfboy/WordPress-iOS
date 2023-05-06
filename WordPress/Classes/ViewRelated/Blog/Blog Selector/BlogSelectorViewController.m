@@ -1,7 +1,7 @@
 #import "BlogSelectorViewController.h"
 #import "BlogDetailsViewController.h"
 #import "WPBlogTableViewCell.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "Blog.h"
 #import "WPAccount.h"
 #import "AccountService.h"
@@ -78,9 +78,7 @@
 {
     if (onlyDefault) {
         NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-        WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-        self.dataSource.account = defaultAccount;
+        self.dataSource.account = [WPAccount lookupDefaultWordPressComAccountInContext:context];
     } else {
         self.dataSource.account = nil;
     }
@@ -104,7 +102,9 @@
 
         self.navigationItem.leftBarButtonItem = cancelButtonItem;
     }
-    
+
+    self.dataSource.shouldHideSelfHostedSites = self.shouldHideSelfHostedSites;
+
     // TableView
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
     
@@ -157,7 +157,7 @@
     self.definesPresentationContext = YES;
 
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
-    self.searchController.dimsBackgroundDuringPresentation = NO;
+    self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.searchController.hidesNavigationBarDuringPresentation = !_displaysNavigationBarWhenSearching;
     self.searchController.delegate = self;
     self.searchController.searchResultsUpdater = self;
@@ -236,18 +236,14 @@
 
 - (void)syncBlogs
 {
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
-    
-    [context performBlock:^{
-        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-        BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-        WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-        
-        if (!defaultAccount) {
+    id<CoreDataStack> coreDataStack = [ContextManager sharedInstance];
+    [coreDataStack.mainContext performBlock:^{
+        WPAccount *account = [WPAccount lookupDefaultWordPressComAccountInContext:coreDataStack.mainContext];
+        if (account == nil) {
             return;
         }
-        
-        [blogService syncBlogsForAccount:defaultAccount success:nil failure:nil];
+        BlogService *blogService = [[BlogService alloc] initWithCoreDataStack:coreDataStack];
+        [blogService syncBlogsForAccount:account success:nil failure:nil];
     }];
 }
 
@@ -271,8 +267,7 @@
     
     // Retrieve
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *service = [[BlogService alloc] initWithManagedObjectContext:context];
-    Blog *selectedBlog = [service blogByBlogId:self.selectedObjectDotcomID];
+    Blog *selectedBlog = [Blog lookupWithID:self.selectedObjectDotcomID in:context];
     
     // Cache
     _selectedObjectID = selectedBlog.objectID;

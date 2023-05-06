@@ -1,4 +1,5 @@
 import UIKit
+import Combine
 
 /// Displays search results from a reader site search.
 ///
@@ -105,8 +106,7 @@ class ReaderSiteSearchViewController: UITableViewController, UIViewControllerRes
             showLoadingView()
         }
 
-        let context = ContextManager.sharedInstance().mainContext
-        let service = ReaderSiteSearchService(managedObjectContext: context)
+        let service = ReaderSiteSearchService(coreDataStack: ContextManager.shared)
         service.performSearch(with: query,
                               page: page,
                               success: { [weak self] (feeds, hasMore, totalFeeds) in
@@ -350,13 +350,13 @@ class ReaderSiteSearchHeaderView: UIView {
 /// The delegate can then use this to re-set and resize the associated
 /// tableview's footer view property.
 ///
-protocol ReaderSiteSearchFooterViewDelegate: class {
+protocol ReaderSiteSearchFooterViewDelegate: AnyObject {
     func readerSiteSearchFooterViewDidChangeFrame(_ footerView: ReaderSiteSearchFooterView)
 }
 
 class ReaderSiteSearchFooterView: UIView {
     private let divider = UIView()
-    private let activityIndicator = UIActivityIndicatorView(style: .gray)
+    private let activityIndicator = UIActivityIndicatorView(style: .medium)
     weak var delegate: ReaderSiteSearchFooterViewDelegate? = nil
 
     private static let expandedHeight: CGFloat = 44.0
@@ -398,6 +398,16 @@ class ReaderSiteSearchFooterView: UIView {
             activityIndicator.stopAnimating()
             frame.size.height = collapsedHeaderFooterHeight
             delegate?.readerSiteSearchFooterViewDidChangeFrame(self)
+        }
+    }
+}
+
+// MARK: - JetpackBannerWrapperViewController
+
+extension ReaderSiteSearchViewController {
+    override func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if let jetpackBannerWrapper = parent as? JetpackBannerWrapperViewController {
+            jetpackBannerWrapper.processJetpackBannerVisibility(scrollView)
         }
     }
 }

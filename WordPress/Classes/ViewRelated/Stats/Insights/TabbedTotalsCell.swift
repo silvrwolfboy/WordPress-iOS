@@ -28,7 +28,7 @@ struct TabData: FilterTabBarItem {
     }
 }
 
-class TabbedTotalsCell: UITableViewCell, NibLoadable {
+class TabbedTotalsCell: StatsBaseCell, NibLoadable {
 
     // MARK: - Properties
 
@@ -60,15 +60,24 @@ class TabbedTotalsCell: UITableViewCell, NibLoadable {
     private var showTotalCount = false
     private var forDetails = false
 
+    override var accessibilityElements: [Any]? {
+            get {
+                return [headingLabel, filterTabBar, rowsStackView].compactMap { $0 }
+            }
+            set { }
+        }
+
     // MARK: - Configure
 
     func configure(tabsData: [TabData],
+                   statSection: StatSection? = nil,
                    siteStatsInsightsDelegate: SiteStatsInsightsDelegate? = nil,
                    siteStatsDetailsDelegate: SiteStatsDetailsDelegate? = nil,
                    showTotalCount: Bool,
                    selectedIndex: Int = 0,
                    forDetails: Bool = false) {
         self.tabsData = tabsData
+        self.statSection = statSection
         self.siteStatsInsightsDelegate = siteStatsInsightsDelegate
         self.siteStatsDetailsDelegate = siteStatsDetailsDelegate
         self.showTotalCount = showTotalCount
@@ -94,7 +103,11 @@ class TabbedTotalsCell: UITableViewCell, NibLoadable {
 private extension TabbedTotalsCell {
 
     func setupFilterBar(selectedIndex: Int) {
-        WPStyleGuide.Stats.configureFilterTabBar(filterTabBar, forTabbedCard: true)
+        if FeatureFlag.statsNewAppearance.enabled && (statSection == .insightsFollowersWordPress || statSection == .insightsFollowersEmail) {
+            WPStyleGuide.Stats.configureFilterTabBar(filterTabBar, forNewInsightsCard: true)
+        } else {
+            WPStyleGuide.Stats.configureFilterTabBar(filterTabBar, forTabbedCard: true)
+        }
         filterTabBar.items = tabsData
         filterTabBar.setSelectedIndex(selectedIndex)
         filterTabBar.addTarget(self, action: #selector(selectedFilterDidChange(_:)), for: .valueChanged)

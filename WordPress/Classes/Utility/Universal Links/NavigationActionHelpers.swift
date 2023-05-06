@@ -4,9 +4,7 @@ import WordPressFlux
 extension NavigationAction {
     func defaultBlog() -> Blog? {
         let context = ContextManager.sharedInstance().mainContext
-        let service = BlogService(managedObjectContext: context)
-
-        return service.lastUsedOrFirstBlog()
+        return Blog.lastUsedOrFirst(in: context)
     }
 
     func blog(from values: [String: String]?) -> Blog? {
@@ -15,15 +13,14 @@ extension NavigationAction {
         }
 
         let context = ContextManager.sharedInstance().mainContext
-        let service = BlogService(managedObjectContext: context)
 
-        if let blog = service.blog(byHostname: domain) {
+        if let blog = Blog.lookup(hostname: domain, in: context) {
             return blog
         }
 
         // Some stats URLs use a site ID instead
         if let siteIDValue = Int(domain) {
-            return service.blog(byBlogId: NSNumber(value: siteIDValue))
+            return try? Blog.lookup(withID: siteIDValue, in: context)
         }
 
         return nil

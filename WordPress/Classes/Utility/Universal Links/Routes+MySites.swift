@@ -12,6 +12,10 @@ enum MySitesRoute {
 }
 
 extension MySitesRoute: Route {
+    var section: DeepLinkSection? {
+        return .mySite
+    }
+
     var action: NavigationAction {
         return self
     }
@@ -36,19 +40,38 @@ extension MySitesRoute: Route {
             return "/plugins/manage/:domain"
         }
     }
+
+    var jetpackPowered: Bool {
+        switch self {
+        case .pages:
+            return false
+        case .posts:
+            return false
+        case .media:
+            return false
+        case .comments:
+            return false
+        case .sharing:
+            return true
+        case .people:
+            return true
+        case .plugins:
+            return false
+        case .managePlugins:
+            return false
+        }
+    }
 }
 
 extension MySitesRoute: NavigationAction {
-    func perform(_ values: [String: String], source: UIViewController? = nil) {
-        guard let coordinator = WPTabBarController.sharedInstance().mySitesCoordinator else {
-            return
-        }
+    func perform(_ values: [String: String], source: UIViewController? = nil, router: LinkRouter) {
+        let coordinator = RootViewCoordinator.sharedPresenter.mySitesCoordinator
 
         guard let blog = blog(from: values) else {
             WPAppAnalytics.track(.deepLinkFailed, withProperties: ["route": path])
 
             if failAndBounce(values) == false {
-                coordinator.showMySites()
+                coordinator.showRootViewController()
                 postFailureNotice(title: NSLocalizedString("Site not found",
                                                            comment: "Error notice shown if the app can't find a specific site belonging to the user"))
             }

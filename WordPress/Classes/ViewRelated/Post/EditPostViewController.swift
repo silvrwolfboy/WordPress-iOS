@@ -17,10 +17,13 @@ class EditPostViewController: UIViewController {
     var insertedMedia: [Media]? = nil
     /// is editing a reblogged post
     var postIsReblogged = false
+    /// the entry point for the editor
+    var entryPoint: PostEditorEntryPoint = .unknown
 
     private let loadAutosaveRevision: Bool
 
     @objc fileprivate(set) var post: Post?
+    private let prompt: BloggingPrompt?
     fileprivate var hasShownEditor = false
     fileprivate var editingExistingPost = false
     fileprivate let blog: Blog
@@ -58,13 +61,21 @@ class EditPostViewController: UIViewController {
         self.init(post: nil, blog: blog)
     }
 
+    /// Initialize as an editor to create a new post for the provided blog and prompt
+    ///
+    /// - Parameter blog: blog to create a new post for
+    /// - Parameter prompt: blogging prompt to configure the new post for
+    convenience init(blog: Blog, prompt: BloggingPrompt) {
+        self.init(post: nil, blog: blog, prompt: prompt)
+    }
+
     /// Initialize as an editor with a specified post to edit and blog to post too.
     ///
     /// - Parameters:
     ///   - post: the post to edit
     ///   - blog: the blog to create a post for, if post is nil
     /// - Note: it's preferable to use one of the convenience initializers
-    fileprivate init(post: Post?, blog: Blog, loadAutosaveRevision: Bool = false) {
+    fileprivate init(post: Post?, blog: Blog, loadAutosaveRevision: Bool = false, prompt: BloggingPrompt? = nil) {
         self.post = post
         self.loadAutosaveRevision = loadAutosaveRevision
         if let post = post {
@@ -75,6 +86,7 @@ class EditPostViewController: UIViewController {
             post.fixLocalMediaURLs()
         }
         self.blog = blog
+        self.prompt = prompt
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
         modalTransitionStyle = .coverVertical
@@ -110,16 +122,19 @@ class EditPostViewController: UIViewController {
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
-        return .lightContent
+        if openWithPostPost {
+            return .darkContent
+        } else {
+            return WPStyleGuide.preferredStatusBarStyle
+        }
     }
 
     fileprivate func postToEdit() -> Post {
         if let post = post {
             return post
         } else {
-            let context = ContextManager.sharedInstance().mainContext
-            let postService = PostService(managedObjectContext: context)
-            let newPost = postService.createDraftPost(for: blog)
+            let newPost = blog.createDraftPost()
+            newPost.prepareForPrompt(prompt)
             post = newPost
             return newPost
         }
@@ -135,6 +150,7 @@ class EditPostViewController: UIViewController {
                 self?.replaceEditor(editor: editor, replacement: replacement)
         })
         editor.postIsReblogged = postIsReblogged
+        editor.entryPoint = entryPoint
         showEditor(editor)
     }
 
@@ -201,6 +217,7 @@ class EditPostViewController: UIViewController {
         }
 
         postPost.setup(post: post)
+        postPost.hideEditButton = isPresentingOverEditor()
         postPost.onClose = {
             self.closePostPost(animated: true)
         }
@@ -210,6 +227,17 @@ class EditPostViewController: UIViewController {
         postPost.preview = {
             self.previewPost()
         }
+    }
+
+    /// - Returns: `true` if `self` was presented over an existing `EditPostViewController`, otherwise `false`.
+    private func isPresentingOverEditor() -> Bool {
+        guard
+            let aztecNavigationController = presentingViewController as? AztecNavigationController,
+            aztecNavigationController.presentingViewController is EditPostViewController
+        else {
+            return false
+        }
+        return true
     }
 
     @objc func shouldShowPostPost(hasChanges: Bool) -> Bool {
@@ -236,16 +264,35 @@ class EditPostViewController: UIViewController {
             return
         }
 
-        let controller = PreviewWebKitViewController(post: post)
+        let controller = PreviewWebKitViewController(post: post, source: "edit_post_preview")
         controller.trackOpenEvent()
         let navWrapper = LightNavigationController(rootViewController: controller)
+        if postPost.traitCollection.userInterfaceIdiom == .pad {
+            navWrapper.modalPresentationStyle = .fullScreen
+        }
         postPost.present(navWrapper, animated: true) {}
     }
 
     @objc func closePostPost(animated: Bool) {
+        // this reference is needed in the completion
+        let presentingController = self.presentingViewController
         // will dismiss self
         dismiss(animated: animated) { [weak self] in
-            self?.afterDismiss?()
+            guard let self = self else {
+                return
+            }
+            self.afterDismiss?()
+            guard let post = self.post,
+                  post.isPublished(),
+                  !self.editingExistingPost,
+                  let controller = presentingController else {
+                return
+            }
+
+            BloggingRemindersFlow.present(from: controller,
+                                          for: self.blog,
+                                          source: .publishFlow,
+                                          alwaysShow: false)
         }
     }
 }

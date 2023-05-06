@@ -3,6 +3,4 @@
 //
 
 #import "WordPress-Bridging-Header.h"
-#import "TestContextManager.h"
 #import "TestingAppDelegate.h"
-#import <OHHTTPStubs/OHHTTPStubs.h>

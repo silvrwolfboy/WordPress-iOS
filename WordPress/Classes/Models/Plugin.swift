@@ -2,7 +2,7 @@ import Foundation
 
 struct Plugin: Equatable {
     let state: PluginState
-    let directoryEntry: PluginDirectoryEntry?
+    var directoryEntry: PluginDirectoryEntry?
 
     var id: String {
         return state.id
@@ -10,6 +10,13 @@ struct Plugin: Equatable {
 
     var name: String {
         return state.name
+    }
+
+    var deactivateAllowed: Bool {
+        guard JetpackFeaturesRemovalCoordinator.jetpackFeaturesEnabled() else {
+            return true
+        }
+        return state.deactivateAllowed
     }
 
     static func ==(lhs: Plugin, rhs: Plugin) -> Bool {

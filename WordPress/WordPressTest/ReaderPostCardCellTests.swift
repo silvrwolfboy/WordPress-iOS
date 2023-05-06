@@ -2,6 +2,10 @@
 import XCTest
 
 class MockContentProvider: NSObject, ReaderPostContentProvider {
+    func siteID() -> NSNumber {
+        return NSNumber(value: 15546)
+    }
+
     func titleForDisplay() -> String! {
         return "A title"
     }
@@ -91,6 +95,10 @@ class MockContentProvider: NSObject, ReaderPostContentProvider {
         return true
     }
 
+    func isAtomic() -> Bool {
+        return false
+    }
+
     func isPrivate() -> Bool {
         return false
     }
@@ -127,6 +135,10 @@ class MockContentProvider: NSObject, ReaderPostContentProvider {
         return "http://automattic.com"
     }
 
+    func siteHostNameForDisplay() -> String! {
+        return "automattic.com"
+    }
+
     func crossPostOriginSiteURLForDisplay() -> String! {
         return ""
     }
@@ -150,7 +162,6 @@ final class ReaderPostCardCellTests: XCTestCase {
         static let saveLabel = NSLocalizedString("Save post", comment: "Save post")
         static let moreLabel = NSLocalizedString("More", comment: "More")
         static let commentsLabelformat = NSLocalizedString("%@ comments", comment: "Number of Comments")
-        static let visitLabel = NSLocalizedString("Visit", comment: "Visit")
         static let reblogLabel = NSLocalizedString("Reblog post", comment: "Accessibility label for the reblog button.")
     }
 
@@ -168,7 +179,7 @@ final class ReaderPostCardCellTests: XCTestCase {
     }
 
     func testHeaderLabelMatchesExpectation() {
-        XCTAssertEqual(cell?.getHeaderButtonForTesting().accessibilityLabel, String(format: TestConstants.headerLabel, "An author", "A blog name" + ", " + mock!.dateForDisplay().mediumString()), "Incorrect accessibility label: Header Button ")
+        XCTAssertEqual(cell?.getHeaderButtonForTesting().accessibilityLabel, String(format: TestConstants.headerLabel, "An author", "A blog name" + ", " + mock!.dateForDisplay().toMediumString()), "Incorrect accessibility label: Header Button ")
     }
 
     func testSaveForLaterButtonLabelMatchesExpectation() {
@@ -183,22 +194,11 @@ final class ReaderPostCardCellTests: XCTestCase {
         XCTAssertEqual(cell?.getMenuButtonForTesting().accessibilityLabel, String(format: "%@", TestConstants.moreLabel), "Incorrect accessibility label: Menu button")
     }
 
-    func testVisitButtonLabelMatchesExpectation() {
-        XCTAssertEqual(cell?.getVisitButtonForTesting().accessibilityLabel, String(format: "%@", TestConstants.visitLabel), "Incorrect accessibility label: Visit button"
-    )
-    }
-
     func testReblogActionButtonMatchesExpectation() {
-        guard FeatureFlag.postReblogging.enabled else {
-            return
-        }
         XCTAssertEqual(cell?.getReblogButtonForTesting().accessibilityLabel, TestConstants.reblogLabel, "Incorrect accessibility label: Reblog button")
     }
 
     func testReblogButtonIsVisible() {
-        guard FeatureFlag.postReblogging.enabled else {
-            return
-        }
         guard let button = cell?.getReblogButtonForTesting() else {
             XCTFail("Reblog button not found.")
             return
@@ -207,9 +207,6 @@ final class ReaderPostCardCellTests: XCTestCase {
     }
 
     func testReblogButtonVisibleWithNoLoggedInUser() {
-        guard FeatureFlag.postReblogging.enabled else {
-            return
-        }
         cell?.loggedInActionVisibility = .visible(enabled: false)
         cell?.configureCell(mock!)
 
@@ -217,6 +214,6 @@ final class ReaderPostCardCellTests: XCTestCase {
             XCTFail("Reblog button not found.")
             return
         }
-        XCTAssertTrue(button.isHidden, "Reblog button should not be visible.")
+        XCTAssertFalse(button.isEnabled, "Reblog button should be disabled.")
     }
 }

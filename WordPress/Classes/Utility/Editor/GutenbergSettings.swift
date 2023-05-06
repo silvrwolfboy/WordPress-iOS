@@ -5,12 +5,22 @@ class GutenbergSettings {
     enum Key {
         static let appWideEnabled = "kUserDefaultsGutenbergEditorEnabled"
         static func enabledOnce(for blog: Blog) -> String {
-            let url = (blog.url ?? "") as String
+            let url = urlStringFrom(blog)
             return "com.wordpress.gutenberg-autoenabled-" + url
         }
         static func showPhase2Dialog(for blog: Blog) -> String {
-            let url = (blog.url ?? "") as String
+            let url = urlStringFrom(blog)
             return "kShowGutenbergPhase2Dialog-" + url
+        }
+        static let focalPointPickerTooltipShown = "kGutenbergFocalPointPickerTooltipShown"
+        static let blockTypeImpressions = "kBlockTypeImpressions"
+
+        private static func urlStringFrom(_ blog: Blog) -> String {
+            return (blog.url ?? "")
+            // New sites will add a slash at the end of URL.
+            // This is removed when the URL is refreshed from remote.
+            // Removing trailing '/' in case there is one for consistency.
+            .removingTrailingCharacterIfExists("/")
         }
     }
 
@@ -22,9 +32,10 @@ class GutenbergSettings {
     }
 
     // MARK: - Internal variables
-    fileprivate let database: KeyValueDatabase
-
-    let context = Environment.current.contextManager.mainContext
+    private let database: KeyValueDatabase
+    private var coreDataStack: CoreDataStack {
+        Environment.current.contextManager
+    }
 
     // MARK: - Initialization
     init(database: KeyValueDatabase) {
@@ -57,13 +68,13 @@ class GutenbergSettings {
     func performGutenbergPhase2MigrationIfNeeded() {
         guard
             ReachabilityUtils.isInternetReachable(),
-            let account = AccountService(managedObjectContext: context).defaultWordPressComAccount()
+            let userID = coreDataStack.performQuery({ try? WPAccount.lookupDefaultWordPressComAccount(in: $0)?.userID })
         else {
             return
         }
 
         var rollout = GutenbergRollout(database: database)
-        if rollout.shouldPerformPhase2Migration(userId: account.userID.intValue) {
+        if rollout.shouldPerformPhase2Migration(userId: userID.intValue) {
             setGutenbergEnabledForAllSites()
             rollout.isUserInRolloutGroup = true
             trackSettingChange(to: true, from: .onProgressiveRolloutPhase2)
@@ -71,14 +82,14 @@ class GutenbergSettings {
     }
 
     private func setGutenbergEnabledForAllSites() {
-        let allBlogs = BlogService(managedObjectContext: context).blogsForAllAccounts()
+        let allBlogs = coreDataStack.performQuery({ (try? BlogQuery().blogs(in: $0)) ?? [] })
         allBlogs.forEach { blog in
             if blog.editor == .aztec {
                 setShowPhase2Dialog(true, for: blog)
                 database.set(true, forKey: Key.enabledOnce(for: blog))
             }
         }
-        let editorSettingsService = EditorSettingsService(managedObjectContext: context)
+        let editorSettingsService = EditorSettingsService(coreDataStack: coreDataStack)
         editorSettingsService.migrateGlobalSettingToRemote(isGutenbergEnabled: true, overrideRemote: true, onSuccess: {
             WPAnalytics.refreshMetadata()
         })
@@ -105,10 +116,15 @@ class GutenbergSettings {
             trackSettingChange(to: isEnabled, from: source)
         }
 
-        blog.mobileEditor = isEnabled ? .gutenberg : .aztec
-        ContextManager.sharedInstance().save(context)
+        let mobileEditor: MobileEditor = isEnabled ? .gutenberg : .aztec
+        blog.mobileEditor = mobileEditor
 
-        WPAnalytics.refreshMetadata()
+        coreDataStack.performAndSave({ context in
+            let blogInContext = try? context.existingObject(with: blog.objectID) as? Blog
+            blogInContext?.mobileEditor = mobileEditor
+        }, completion: {
+            WPAnalytics.refreshMetadata()
+        }, on: .main)
     }
 
     private func shouldUpdateSettings(enabling isEnablingGutenberg: Bool, for blog: Blog) -> Bool {
@@ -129,7 +145,7 @@ class GutenbergSettings {
     ///
     /// - Parameter blog: The site to synch editor settings
     func postSettingsToRemote(for blog: Blog) {
-        let editorSettingsService = EditorSettingsService(managedObjectContext: context)
+        let editorSettingsService = EditorSettingsService(coreDataStack: coreDataStack)
         editorSettingsService.postEditorSetting(for: blog, success: {}) { (error) in
             DDLogError("Failed to post new post selection with Error: \(error)")
         }
@@ -149,7 +165,30 @@ class GutenbergSettings {
         database.set(true, forKey: Key.enabledOnce(for: blog))
     }
 
+    /// True if it should show the tooltip for the focal point picker
+    var focalPointPickerTooltipShown: Bool {
+        get {
+            database.bool(forKey: Key.focalPointPickerTooltipShown)
+        }
+        set {
+            database.set(newValue, forKey: Key.focalPointPickerTooltipShown)
+        }
+    }
+
+    var blockTypeImpressions: [String: Int] {
+        get {
+            database.object(forKey: Key.blockTypeImpressions) as? [String: Int] ?? [:]
+        }
+        set {
+            database.set(newValue, forKey: Key.blockTypeImpressions)
+        }
+    }
+
     // MARK: - Gutenberg Choice Logic
+
+    func isSimpleWPComSite(_ blog: Blog) -> Bool {
+        return !blog.isAtomic() && blog.isHostedAtWPcom
+    }
 
     /// Call this method to know if Gutenberg must be used for the specified post.
     ///
@@ -160,9 +199,8 @@ class GutenbergSettings {
     ///
     func mustUseGutenberg(for post: AbstractPost) -> Bool {
         let blog = post.blog
-
         if post.isContentEmpty() {
-            return blog.isGutenbergEnabled
+            return isSimpleWPComSite(post.blog) || blog.isGutenbergEnabled
         } else {
             // It's an existing post
             return post.containsGutenbergBlocks()
@@ -170,7 +208,8 @@ class GutenbergSettings {
     }
 
     func getDefaultEditor(for blog: Blog) -> MobileEditor {
-        return .aztec
+        database.set(true, forKey: Key.enabledOnce(for: blog))
+        return .gutenberg
     }
 }
 
@@ -184,5 +223,19 @@ class GutenbergSettingsBridge: NSObject {
     @objc(postSettingsToRemoteForBlog:)
     static func postSettingsToRemote(for blog: Blog) {
         GutenbergSettings().postSettingsToRemote(for: blog)
+    }
+
+    @objc(isSimpleWPComSite:)
+    static func isSimpleWPComSite(_ blog: Blog) -> Bool {
+        return GutenbergSettings().isSimpleWPComSite(blog)
+    }
+}
+
+private extension String {
+    func removingTrailingCharacterIfExists(_ character: Character) -> String {
+        if self.last == character {
+            return String(dropLast())
+        }
+        return self
     }
 }

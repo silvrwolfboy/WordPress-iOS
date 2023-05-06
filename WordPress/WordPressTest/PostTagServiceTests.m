@@ -3,7 +3,6 @@
 #import "Blog.h"
 #import "PostTag.h"
 #import "PostTagService.h"
-#import "TestContextManager.h"
 @import WordPressKit;
 #import "WordPressTest-Swift.h"
 
@@ -28,7 +27,7 @@
 
 @interface PostTagServiceTests : XCTestCase
 
-@property (nonatomic, strong) TestContextManager *manager;
+@property (nonatomic, strong) id<CoreDataStack> manager;
 @property (nonatomic, strong) Blog *blog;
 @property (nonatomic, strong) PostTagServiceForStubbing *service;
 
@@ -40,7 +39,7 @@
 {
     [super setUp];
 
-    self.manager = [TestContextManager new];
+    self.manager = [self coreDataStackForTesting];
     WordPressComRestApi *api = OCMStrictClassMock([WordPressComRestApi class]);
 
     Blog *blog = [ModelTestHelper insertDotComBlogWithContext:self.manager.mainContext];
@@ -74,8 +73,8 @@
                                failure:[OCMArg isNotNil]]);
 
     [self.service syncTagsForBlog:self.blog
-                          success:^(NSArray<PostTag *> * _Nonnull tags) {}
-                          failure:^(NSError * _Nonnull error) {}];
+                          success:^(NSArray<PostTag *> * _Nonnull __unused tags) {}
+                          failure:^(NSError * _Nonnull __unused error) {}];
 }
 
 - (void)testThatSyncTagsWithPagingWorks
@@ -101,8 +100,8 @@
     [self.service syncTagsForBlog:self.blog
                            number:number
                            offset:offset
-                          success:^(NSArray<PostTag *> * _Nonnull tags) {}
-                          failure:^(NSError * _Nonnull error) {}];
+                          success:^(NSArray<PostTag *> * _Nonnull __unused tags) {}
+                          failure:^(NSError * _Nonnull __unused error) {}];
 }
 
 - (void)testThatSearchTagsWithNameWorks
@@ -116,8 +115,8 @@
     
     [self.service searchTagsWithName:name
                                 blog:self.blog
-                             success:^(NSArray<PostTag *> * _Nonnull tags) {}
-                             failure:^(NSError * _Nonnull error) {}];
+                             success:^(NSArray<PostTag *> * _Nonnull __unused tags) {}
+                             failure:^(NSError * _Nonnull __unused error) {}];
 }
 
 @end

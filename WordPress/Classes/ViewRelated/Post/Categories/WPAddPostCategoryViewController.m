@@ -1,11 +1,10 @@
 #import "WPAddPostCategoryViewController.h"
 #import "Blog.h"
 #import "PostCategory.h"
-#import "PostCategoriesViewController.h"
 #import "Constants.h"
 #import "SiteSettingsViewController.h"
 #import "PostCategoryService.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "BlogService.h"
 #import "WordPress-Swift.h"
 #import <WordPressShared/NSString+Util.h>
@@ -26,7 +25,7 @@
 
 - (instancetype)initWithBlog:(Blog *)blog
 {
-    self = [super initWithStyle:UITableViewStyleGrouped];
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
         _blog = blog;
     }
@@ -41,6 +40,7 @@
     self.tableView.sectionFooterHeight = 0.0f;
     // Set this to 0 to avoid automattic sizing of cells and getting label cell to short.
     self.tableView.estimatedRowHeight = 0.0f;
+    self.view.tintColor = [UIColor murielEditorPrimary];
 
     self.saveButtonItem = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Save", @"Save button label (saving content, ex: Post, Page, Comment, Category).")
                                                            style:[WPStyleGuide barButtonStyleForDone]
@@ -64,7 +64,7 @@
 
 - (void)addProgressIndicator
 {
-    UIActivityIndicatorView *activityView = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
+    UIActivityIndicatorView *activityView = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     UIBarButtonItem *activityButtonItem = [[UIBarButtonItem alloc] initWithCustomView:activityView];
     [activityView startAnimating];
 
@@ -84,7 +84,7 @@
 - (void)saveAddCategory:(id)sender
 {
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    PostCategoryService *categoryService = [[PostCategoryService alloc] initWithManagedObjectContext:context];
+    PostCategoryService *categoryService = [[PostCategoryService alloc] initWithCoreDataStack:[ContextManager sharedInstance]];
     NSString *catName = [self.createCategoryCell.textField.text trim];
 
     if (!catName ||[catName length] == 0) {
@@ -96,7 +96,10 @@
         return;
     }
 
-    PostCategory *category = [categoryService findWithBlogObjectID:self.blog.objectID parentID:self.parentCategory.categoryID andName:catName];
+    PostCategory *category = [PostCategory lookupWithBlogObjectID:self.blog.objectID
+                                                 parentCategoryID:self.parentCategory.categoryID
+                                                     categoryName:catName
+                                                        inContext:context];
     if (category) {
         // If there's an existing category with that name and parent, let's use that
         [self dismissWithCategory:category];

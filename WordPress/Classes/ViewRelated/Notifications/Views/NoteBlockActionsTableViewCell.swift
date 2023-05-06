@@ -116,6 +116,17 @@ class NoteBlockActionsTableViewCell: NoteBlockTableViewCell {
         }
     }
 
+    /// Indicates if all actions are disabled.
+    ///
+    @objc var allActionsDisabled: Bool {
+        return !isReplyEnabled &&
+            !isLikeEnabled &&
+            !isApproveEnabled &&
+            !isTrashEnabled &&
+            !isSpamEnabled &&
+            !isEditEnabled
+    }
+
     /// Indicates whether Like is in it's "Selected" state, or not
     ///
     @objc var isLikeOn: Bool {
@@ -194,6 +205,7 @@ class NoteBlockActionsTableViewCell: NoteBlockTableViewCell {
         btnReply.setTitleColor(textNormalColor, for: UIControl.State())
         btnReply.accessibilityLabel = ReplyToComment.title
         btnReply.accessibilityHint = ReplyToComment.hint
+        btnReply.accessibilityIdentifier = ReplyToComment.identifier
 
         btnLike.setTitle(LikeComment.TitleStrings.like, for: UIControl.State())
         btnLike.setTitle(LikeComment.TitleStrings.unlike, for: .highlighted)
@@ -361,6 +373,6 @@ private extension NoteBlockActionsTableViewCell {
 
     struct Constants {
         static let buttonSpacing = CGFloat(20)
-        static let buttonSpacingCompact = CGFloat(9)
+        static let buttonSpacingCompact = CGFloat(2)
     }
 }

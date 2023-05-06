@@ -93,7 +93,7 @@
 {
     SharingAuthorizationWebViewController *webViewController = [[SharingAuthorizationWebViewController alloc] initWith:self.publicizeService url:connectionURL for:self.blog delegate:self];
 
-    self.navController = [[UINavigationController alloc] initWithRootViewController:webViewController];
+    self.navController = [[LightNavigationController alloc] initWithRootViewController:webViewController];
     self.navController.modalPresentationStyle = UIModalPresentationFormSheet;
     [self.viewController presentViewController:self.navController animated:YES completion:nil];
 }
@@ -109,7 +109,7 @@
 
     if (self.reconnecting) {
         // Resync publicize connections.
-        SharingService *sharingService = [[SharingService alloc] initWithManagedObjectContext:[self.blog managedObjectContext]];
+        SharingSyncService *sharingService = [[SharingSyncService alloc] initWithCoreDataStack:[ContextManager sharedInstance]];
         [sharingService syncPublicizeConnectionsForBlog:self.blog success:^{
             [self handleReconnectSucceeded];
         } failure:^(NSError *error) {
@@ -175,7 +175,7 @@
         [self.delegate sharingAuthorizationHelper:self willFetchKeyringsForService:self.publicizeService];
     }
 
-    SharingService *sharingService = [[SharingService alloc] initWithManagedObjectContext:[self.blog managedObjectContext]];
+    SharingService *sharingService = [[SharingService alloc] initWithContextManager:[ContextManager sharedInstance]];
     __weak __typeof__(self) weakSelf = self;
     [sharingService fetchKeyringConnectionsForBlog:self.blog success:^(NSArray *keyringConnections) {
         if ([weakSelf.delegate respondsToSelector:@selector(sharingAuthorizationHelper:didFetchKeyringsForService:)]) {
@@ -212,7 +212,7 @@
         }
         
         [weakSelf showAccountSelectorForKeyrings:marr];
-    } failure:^(NSError *error) {
+    } failure:^(NSError * __unused error) {
         if ([self.delegate respondsToSelector:@selector(sharingAuthorizationHelper:keyringFetchFailedForService:)]) {
             [self.delegate sharingAuthorizationHelper:self keyringFetchFailedForService:self.publicizeService];
             return;
@@ -318,7 +318,7 @@
 
     [alertController addCancelActionWithTitle:cancel handler:nil];
 
-    [alertController addDefaultActionWithTitle:connect handler:^(UIAlertAction *action) {
+    [alertController addDefaultActionWithTitle:connect handler:^(UIAlertAction * __unused action) {
         [self updateConnection:currentPublicizeConnection forKeyringConnection:keyringConnection withExternalID:externalID];
     }];
 
@@ -340,7 +340,7 @@
 
     [self dismissNavViewController];
 
-    SharingService *sharingService = [[SharingService alloc] initWithManagedObjectContext:[self.blog managedObjectContext]];
+    SharingService *sharingService = [[SharingService alloc] initWithContextManager:[ContextManager sharedInstance]];
 
     [sharingService updateExternalID:externalID forBlog:self.blog forPublicizeConnection:publicizeConnection success:^{
         if ([self.delegate respondsToSelector:@selector(sharingAuthorizationHelper:didConnectToService:withPublicizeConnection:)]) {
@@ -367,7 +367,7 @@
 
     [self dismissNavViewController];
 
-    SharingService *sharingService = [[SharingService alloc] initWithManagedObjectContext:[self.blog managedObjectContext]];
+    SharingService *sharingService = [[SharingService alloc] initWithContextManager:[ContextManager sharedInstance]];
     [sharingService createPublicizeConnectionForBlog:self.blog
                                              keyring:keyConn
                                       externalUserID:externalUserID

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.CocoaTouch.XIB" version="3.0" toolsVersion="14865.1" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" colorMatched="YES">
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.XIB" version="3.0" toolsVersion="21225" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" colorMatched="YES">
     <device id="retina4_7" orientation="portrait" appearance="light"/>
     <dependencies>
         <deployment identifier="iOS"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="14819.2"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="21207"/>
         <capability name="Named colors" minToolsVersion="9.0"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
@@ -15,7 +15,8 @@
             <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
             <subviews>
                 <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="OEo-2z-Cmk">
-                    <rect key="frame" x="273" y="0.0" width="44" height="36"/>
+                    <rect key="frame" x="260" y="0.0" width="44" height="36"/>
+                    <accessibility key="accessibilityConfiguration" label="More menu"/>
                     <constraints>
                         <constraint firstAttribute="width" constant="44" id="NQj-8B-nY9"/>
                         <constraint firstAttribute="height" constant="36" id="j12-ha-Xlw"/>
@@ -25,20 +26,19 @@
                     </connections>
                 </button>
                 <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="DATE" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="eUE-Sb-m3L">
-                    <rect key="frame" x="16" y="0.0" width="32.5" height="36"/>
+                    <rect key="frame" x="16" y="10" width="32.5" height="16"/>
                     <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
-                    <fontDescription key="fontDescription" type="system" pointSize="13"/>
+                    <fontDescription key="fontDescription" style="UICTFontTextStyleFootnote"/>
                     <color key="textColor" name="Gray50"/>
                     <nil key="highlightedColor"/>
                 </label>
             </subviews>
             <color key="backgroundColor" red="0.9137254901960784" green="0.93725490196078431" blue="0.95294117647058818" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
             <constraints>
-                <constraint firstAttribute="trailingMargin" secondItem="OEo-2z-Cmk" secondAttribute="trailing" constant="-13" id="EWN-SE-Ilb"/>
-                <constraint firstAttribute="bottom" secondItem="eUE-Sb-m3L" secondAttribute="bottom" id="ILT-ul-3i5"/>
-                <constraint firstItem="eUE-Sb-m3L" firstAttribute="leading" secondItem="iN0-l3-epB" secondAttribute="leadingMargin" id="LH1-C3-ah6"/>
+                <constraint firstItem="eUE-Sb-m3L" firstAttribute="centerY" secondItem="OEo-2z-Cmk" secondAttribute="centerY" id="5cB-Im-fBT"/>
+                <constraint firstAttribute="leadingMargin" secondItem="eUE-Sb-m3L" secondAttribute="leading" id="Bi6-N7-44O"/>
+                <constraint firstAttribute="trailingMargin" secondItem="OEo-2z-Cmk" secondAttribute="trailing" id="EWN-SE-Ilb"/>
                 <constraint firstAttribute="bottom" secondItem="OEo-2z-Cmk" secondAttribute="bottom" id="a35-Lf-TpM"/>
-                <constraint firstItem="eUE-Sb-m3L" firstAttribute="top" secondItem="iN0-l3-epB" secondAttribute="top" id="oHh-OB-AWn"/>
             </constraints>
             <nil key="simulatedStatusBarMetrics"/>
             <nil key="simulatedTopBarMetrics"/>
@@ -53,7 +53,7 @@
     </objects>
     <resources>
         <namedColor name="Gray50">
-            <color red="0.40392156862745099" green="0.41568627450980394" blue="0.45490196078431372" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+            <color red="0.39215686274509803" green="0.41176470588235292" blue="0.4392156862745098" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
         </namedColor>
     </resources>
 </document>

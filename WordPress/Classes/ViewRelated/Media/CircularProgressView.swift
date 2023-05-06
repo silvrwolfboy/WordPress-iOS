@@ -28,13 +28,13 @@ class CircularProgressView: UIView {
 
     @objc(CircularProgressViewStyle)
     enum Style: Int {
-        case wordPressBlue
+        case primary
         case white
         case mediaCell
 
         fileprivate var appearance: Appearance {
             switch self {
-            case .wordPressBlue:
+            case .primary:
                 return Appearance(
                     progressIndicatorAppearance: ProgressIndicatorView.Appearance(lineColor: .primary(.shade40)),
                     backgroundColor: .clear,
@@ -188,7 +188,7 @@ class CircularProgressView: UIView {
     private func configureRetryViews() {
         configureAccessoryView(retryView)
         retryView.label.text = NSLocalizedString("Retry", comment: "Retry. Verb – retry a failed media upload.")
-        retryView.imageView.image = Gridicon.iconOfType(.refresh)
+        retryView.imageView.image = .gridicon(.refresh)
     }
 
     private func configureAccessoryView(_ view: UIView) {
@@ -288,7 +288,7 @@ final class ProgressIndicatorView: UIView {
     private let progressTrackLayer = CAShapeLayer()
     private let progressLayer = CAShapeLayer()
 
-    fileprivate struct Appearance {
+    struct Appearance {
         let defaultSize: CGFloat
         let lineWidth: CGFloat
         let lineColor: UIColor
@@ -323,7 +323,7 @@ final class ProgressIndicatorView: UIView {
     private let appearance: Appearance
     private var isAnimating = false
 
-    fileprivate init(appearance: Appearance = Appearance()) {
+    init(appearance: Appearance = Appearance()) {
         self.appearance = appearance
         super.init(frame: CGRect(x: 0, y: 0, width: appearance.defaultSize, height: appearance.defaultSize))
         setup()
@@ -354,6 +354,11 @@ final class ProgressIndicatorView: UIView {
         layer.isHidden = true
     }
 
+    private func updateColors() {
+        indeterminateLayer.strokeColor = appearance.lineColor.cgColor
+        progressTrackLayer.strokeColor = appearance.trackColor.cgColor
+    }
+
     required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -368,6 +373,12 @@ final class ProgressIndicatorView: UIView {
         if state == .indeterminate {
             startAnimating()
         }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        updateColors()
+        setNeedsDisplay()
     }
 
     private func stateDidChange() {

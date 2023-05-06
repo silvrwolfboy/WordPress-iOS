@@ -4,17 +4,27 @@ private var alertWorkItem: DispatchWorkItem?
 private var observer: NSObjectProtocol?
 
 extension BlogDetailsViewController {
+
     @objc func startObservingQuickStart() {
         observer = NotificationCenter.default.addObserver(forName: .QuickStartTourElementChangedNotification, object: nil, queue: nil) { [weak self] (notification) in
             guard self?.blog.managedObjectContext != nil else {
                 return
             }
-            self?.refreshSiteIcon()
             self?.configureTableViewData()
             self?.reloadTableViewPreservingSelection()
-            if let index = QuickStartTourGuide.find()?.currentElementInt(),
-                let element = QuickStartTourElement(rawValue: index) {
-                self?.scroll(to: element)
+
+            if let info = notification.userInfo?[QuickStartTourGuide.notificationElementKey] as? QuickStartTourElement {
+                switch info {
+                case .stats, .mediaScreen:
+                    guard QuickStartTourGuide.shared.entryPointForCurrentTour == .blogDetails else {
+                        return
+                    }
+                    fallthrough
+                case .pages, .sharing:
+                    self?.scroll(to: info)
+                default:
+                    break
+                }
             }
         }
     }
@@ -24,11 +34,18 @@ extension BlogDetailsViewController {
     }
 
     @objc func startAlertTimer() {
+        guard shouldStartAlertTimer else {
+            return
+        }
         let newWorkItem = DispatchWorkItem { [weak self] in
-            self?.showNoticeOrAlertAsNeeded()
+            self?.showNoticeAsNeeded()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: newWorkItem)
         alertWorkItem = newWorkItem
+    }
+    // do not start alert timer if the themes modal is still being presented
+    private var shouldStartAlertTimer: Bool {
+        !((self.presentedViewController as? UINavigationController)?.visibleViewController is WebKitViewController)
     }
 
     @objc func stopAlertTimer() {
@@ -45,124 +62,71 @@ extension BlogDetailsViewController {
         return false
     }
 
-    private func showNoticeOrAlertAsNeeded() {
-        guard let tourGuide = QuickStartTourGuide.find() else {
-            showNotificationPrimerAlert()
+    private func showNoticeAsNeeded() {
+        let quickStartGuide = QuickStartTourGuide.shared
+
+        guard let tourToSuggest = quickStartGuide.tourToSuggest(for: blog) else {
+            quickStartGuide.showCongratsNoticeIfNeeded(for: blog)
             return
         }
 
-        if tourGuide.shouldShowUpgradeToV2Notice(for: blog) {
-            showUpgradeToV2Alert(for: blog)
-
-            tourGuide.didShowUpgradeToV2Notice(for: blog)
-        } else if let tourToSuggest = tourGuide.tourToSuggest(for: blog) {
-            tourGuide.suggest(tourToSuggest, for: blog)
+        if quickStartGuide.tourInProgress {
+            // If tour is in progress, show notice regardless of quickstart is shown in dashboard or my site
+            quickStartGuide.suggest(tourToSuggest, for: blog)
         } else {
-            showNotificationPrimerAlert()
+            guard shouldShowQuickStartChecklist() else {
+                return
+            }
+            // Show initial notice only if quick start is shown in my site
+            quickStartGuide.suggest(tourToSuggest, for: blog)
         }
+    }
+
+    @objc func shouldShowDashboard() -> Bool {
+        guard let parentVC = parent as? MySiteViewController, isDashboardEnabled() else {
+            return false
+        }
+
+        return parentVC.mySiteSettings.defaultSection == .dashboard
     }
 
     @objc func shouldShowQuickStartChecklist() -> Bool {
-        return QuickStartTourGuide.shouldShowChecklist(for: blog)
+        if isDashboardEnabled() {
+
+            guard let parentVC = parent as? MySiteViewController else {
+                return false
+            }
+
+            return QuickStartTourGuide.quickStartEnabled(for: blog) && parentVC.mySiteSettings.defaultSection == .siteMenu
+        }
+
+        return QuickStartTourGuide.quickStartEnabled(for: blog)
     }
 
-    @objc func showQuickStartCustomize() {
-        showQuickStart(with: .customize)
-    }
-
-    @objc func showQuickStartGrow() {
-        showQuickStart(with: .grow)
-    }
-
-    private func showQuickStart(with type: QuickStartType) {
-        let checklist = QuickStartChecklistViewController(blog: blog, type: type)
+    @objc func showQuickStart() {
+        let currentCollections = QuickStartFactory.collections(for: blog)
+        guard let collectionToShow = currentCollections.first else {
+            return
+        }
+        let checklist = QuickStartChecklistViewController(blog: blog, collection: collectionToShow)
         let navigationViewController = UINavigationController(rootViewController: checklist)
-        present(navigationViewController, animated: true, completion: nil)
+        present(navigationViewController, animated: true)
 
-        QuickStartTourGuide.find()?.visited(.checklist)
+        QuickStartTourGuide.shared.visited(.checklist)
+
+        createButtonCoordinator?.hideCreateButtonTooltip()
     }
 
     @objc func quickStartSectionViewModel() -> BlogDetailsSection {
-        let detailFormatStr = NSLocalizedString("%1$d of %2$d completed", comment: "Format string for displaying number of compelted quickstart tutorials. %1$d is number completed, %2$d is total number of tutorials available.")
-
-        let customizeRow = BlogDetailsRow(title: NSLocalizedString("Customize Your Site", comment: "Name of the Quick Start list that guides users through a few tasks to customize their new website."),
-                                          identifier: QuickStartListTitleCell.reuseIdentifier,
-                                          accessibilityIdentifier: "Customize Your Site Row",
-                                          image: Gridicon.iconOfType(.customize)) { [weak self] in
-                                            self?.showQuickStartCustomize()
-        }
-        customizeRow.quickStartIdentifier = .checklist
-        customizeRow.showsSelectionState = false
-         if let customizeDetailCount = QuickStartTourGuide.find()?.countChecklistCompleted(in: QuickStartTourGuide.customizeListTours, for: blog) {
-             customizeRow.detail = String(format: detailFormatStr, customizeDetailCount, QuickStartTourGuide.customizeListTours.count)
-             customizeRow.quickStartTitleState = customizeDetailCount == QuickStartTourGuide.customizeListTours.count ? .completed : .customizeIncomplete
-        }
-
-        let growRow = BlogDetailsRow(title: NSLocalizedString("Grow Your Audience", comment: "Name of the Quick Start list that guides users through a few tasks to customize their new website."),
-                                        identifier: QuickStartListTitleCell.reuseIdentifier,
-                                        accessibilityIdentifier: "Grow Your Audience Row",
-                                        image: Gridicon.iconOfType(.multipleUsers)) { [weak self] in
-                                            self?.showQuickStartGrow()
-                                        }
-        growRow.quickStartIdentifier = .checklist
-        growRow.showsSelectionState = false
-         if let growDetailCount = QuickStartTourGuide.find()?.countChecklistCompleted(in: QuickStartTourGuide.growListTours, for: blog) {
-             growRow.detail = String(format: detailFormatStr, growDetailCount, QuickStartTourGuide.growListTours.count)
-             growRow.quickStartTitleState = growDetailCount == QuickStartTourGuide.growListTours.count ? .completed : .growIncomplete
-        }
+        let row = BlogDetailsRow()
+        row.callback = {}
 
         let sectionTitle = NSLocalizedString("Next Steps", comment: "Table view title for the quick start section.")
-        let section = BlogDetailsSection(title: sectionTitle, andRows: [customizeRow, growRow], category: .quickStart)
+        let section = BlogDetailsSection(title: sectionTitle,
+                                         rows: [row],
+                                         footerTitle: nil,
+                                         category: .quickStart)
         section.showQuickStartMenu = true
         return section
-    }
-
-    private func showNotificationPrimerAlert() {
-        guard noPresentedViewControllers else {
-            return
-        }
-
-        guard !UserDefaults.standard.notificationPrimerAlertWasDisplayed else {
-            return
-        }
-
-        let mainContext = ContextManager.shared.mainContext
-        let accountService = AccountService(managedObjectContext: mainContext)
-
-        guard accountService.defaultWordPressComAccount() != nil else {
-            return
-        }
-
-        PushNotificationsManager.shared.loadAuthorizationStatus { [weak self] (enabled) in
-            guard enabled == .notDetermined else {
-                return
-            }
-
-            UserDefaults.standard.notificationPrimerAlertWasDisplayed = true
-
-            let alert = FancyAlertViewController.makeNotificationPrimerAlertController { (controller) in
-                InteractiveNotificationsManager.shared.requestAuthorization {
-                    DispatchQueue.main.async {
-                        controller.dismiss(animated: true)
-                    }
-                }
-            }
-            alert.modalPresentationStyle = .custom
-            alert.transitioningDelegate = self
-            self?.tabBarController?.present(alert, animated: true)
-        }
-    }
-
-    private func showUpgradeToV2Alert(for blog: Blog) {
-        guard noPresentedViewControllers else {
-            return
-        }
-
-        let alert = FancyAlertViewController.makeQuickStartUpgradeToV2AlertController(blog: blog)
-        alert.modalPresentationStyle = .custom
-        alert.transitioningDelegate = self
-        tabBarController?.present(alert, animated: true)
-
-        WPAnalytics.track(.quickStartMigrationDialogViewed)
     }
 }

@@ -4,28 +4,12 @@ import Aztec
 import WordPressEditor
 import Nimble
 
-class AztecPostViewControllerAttachmentTests: XCTestCase {
-
-    private var contextManager: TestContextManager!
-    private var context: NSManagedObjectContext!
-
-    override func setUp() {
-        super.setUp()
-
-        contextManager = TestContextManager()
-        context = contextManager.newDerivedContext()
-    }
-
-    override func tearDown() {
-        super.tearDown()
-        context = nil
-        contextManager = nil
-    }
+class AztecPostViewControllerAttachmentTests: CoreDataTestCase {
 
     func testMediaUploadErrorsWillShowAnErrorMessageAndOverlay() {
         // Arrange
-        let media = Media(context: context)
-        let post = Fixtures.createPost(context: context, with: media)
+        let media = Media(context: mainContext)
+        let post = Fixtures.createPost(context: mainContext, with: media)
         let vc = Fixtures.createAztecPostViewController(with: post)
 
         let attachment = vc.findAttachment(withUploadID: media.uploadID)!
@@ -44,8 +28,8 @@ class AztecPostViewControllerAttachmentTests: XCTestCase {
 
     func testRestartingOfMediaUploadsWillClearErrorMessageAndOverlay() {
         // Arrange
-        let media = Media(context: context)
-        let post = Fixtures.createPost(context: context, with: media)
+        let media = Media(context: mainContext)
+        let post = Fixtures.createPost(context: mainContext, with: media)
         let vc = Fixtures.createAztecPostViewController(with: post)
 
         let attachment = vc.findAttachment(withUploadID: media.uploadID)!
@@ -66,8 +50,8 @@ class AztecPostViewControllerAttachmentTests: XCTestCase {
 
     func testUpdatePostContentAfterAMediaThumbnailUpdate() {
         // Arrange
-        let media = Media(context: context)
-        let post = Fixtures.createPost(context: context, with: media)
+        let media = Media(context: mainContext)
+        let post = Fixtures.createPost(context: mainContext, with: media)
         let vc = Fixtures.createAztecPostViewController(with: post)
 
         // Act

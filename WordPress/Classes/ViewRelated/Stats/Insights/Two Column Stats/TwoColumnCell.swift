@@ -1,6 +1,6 @@
 import UIKit
 
-class TwoColumnCell: UITableViewCell, NibLoadable, Accessible {
+class TwoColumnCell: StatsBaseCell, NibLoadable, Accessible {
 
     // MARK: - Properties
 
@@ -10,13 +10,18 @@ class TwoColumnCell: UITableViewCell, NibLoadable, Accessible {
     @IBOutlet weak var viewMoreLabel: UILabel!
     @IBOutlet weak var viewMoreButton: UIButton!
     @IBOutlet weak var bottomSeparatorLine: UIView!
-    @IBOutlet weak var rowsStackViewBottomConstraint: NSLayoutConstraint!
-    @IBOutlet weak var viewMoreHeightConstraint: NSLayoutConstraint!
 
     private typealias Style = WPStyleGuide.Stats
     private var dataRows = [StatsTwoColumnRowData]()
-    private var statSection: StatSection?
     private weak var siteStatsInsightsDelegate: SiteStatsInsightsDelegate?
+
+    override var accessibilityElements: [Any]? {
+        get {
+            return [headingLabel, rowsStackView, viewMoreButton].compactMap { $0 }
+        }
+
+        set { }
+    }
 
     // MARK: - View
 
@@ -35,6 +40,7 @@ class TwoColumnCell: UITableViewCell, NibLoadable, Accessible {
         self.dataRows = dataRows
         self.statSection = statSection
         self.siteStatsInsightsDelegate = siteStatsInsightsDelegate
+
         addRows()
         toggleViewMore()
     }
@@ -42,6 +48,7 @@ class TwoColumnCell: UITableViewCell, NibLoadable, Accessible {
     func prepareForVoiceOver() {
         viewMoreButton.accessibilityLabel =
             NSLocalizedString("View more", comment: "Accessibility label for View more button in Stats.")
+        viewMoreButton.accessibilityHint = NSLocalizedString("Tap to view more details.", comment: "Accessibility hint for a button that opens a new view with more details.")
     }
 }
 
@@ -76,7 +83,6 @@ private extension TwoColumnCell {
     func toggleViewMore() {
         let showViewMore = !dataRows.isEmpty && statSection == .insightsAnnualSiteStats
         viewMoreView.isHidden = !showViewMore
-        rowsStackViewBottomConstraint.constant = showViewMore ? viewMoreHeightConstraint.constant : 0
     }
 
     @IBAction func didTapViewMore(_ sender: UIButton) {
@@ -101,20 +107,6 @@ private extension TwoColumnCell {
             WPAppAnalytics.track(event, withBlogID: blogIdentifier)
         } else {
             WPAppAnalytics.track(event)
-        }
-    }
-
-}
-
-// MARK: - Analytics support
-
-private extension StatSection {
-    var analyticsViewMoreEvent: WPAnalyticsStat? {
-        switch self {
-        case .insightsAnnualSiteStats:
-            return .statsViewMoreTappedThisYear
-        default:
-            return nil
         }
     }
 }

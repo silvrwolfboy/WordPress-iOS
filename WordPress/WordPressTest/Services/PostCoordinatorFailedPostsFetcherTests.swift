@@ -1,26 +1,20 @@
+import Nimble
+import XCTest
 
 @testable import WordPress
-import Nimble
 
-class PostCoordinatorFailedPostsFetcherTests: XCTestCase {
-    private var contextManager: TestContextManager!
-    private var context: NSManagedObjectContext!
-
+class PostCoordinatorFailedPostsFetcherTests: CoreDataTestCase {
     private var fetcher: PostCoordinator.FailedPostsFetcher!
 
     override func setUp() {
         super.setUp()
 
-        contextManager = TestContextManager()
-        context = contextManager.newDerivedContext()
-        fetcher = PostCoordinator.FailedPostsFetcher(context)
+        fetcher = PostCoordinator.FailedPostsFetcher(mainContext)
     }
 
     override func tearDown() {
         super.tearDown()
         fetcher = nil
-        context = nil
-        contextManager = nil
     }
 
     func testItReturnsPostsThatCanBeAutoUploadedOrAutoSaved() {
@@ -61,7 +55,7 @@ private extension PostCoordinatorFailedPostsFetcherTests {
                     remoteStatus: AbstractPostRemoteStatus = .failed,
                     hasRemote: Bool = false,
                     blog: Blog? = nil) -> Post {
-        let post = Post(context: context)
+        let post = Post(context: mainContext)
         post.status = status
         post.remoteStatus = remoteStatus
 
@@ -79,7 +73,7 @@ private extension PostCoordinatorFailedPostsFetcherTests {
     }
 
     func createBlog(supportsWPComAPI: Bool) -> Blog {
-        let blog = NSEntityDescription.insertNewObject(forEntityName: "Blog", into: context) as! Blog
+        let blog = NSEntityDescription.insertNewObject(forEntityName: "Blog", into: mainContext) as! Blog
 
         if supportsWPComAPI {
             blog.supportsWPComAPI()
@@ -92,7 +86,7 @@ private extension PostCoordinatorFailedPostsFetcherTests {
 private extension PostCoordinator.FailedPostsFetcher {
     func getPostsToRetrySync() -> [AbstractPost] {
         var result = [AbstractPost]()
-        waitUntil(timeout: 5) { done in
+        waitUntil(timeout: DispatchTimeInterval.seconds(5)) { done in
             self.postsAndRetryActions { postsAndActions in
                 result = Array(postsAndActions.filter { $1 != .nothing }.keys)
                 done()

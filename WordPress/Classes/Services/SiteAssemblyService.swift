@@ -1,11 +1,17 @@
 
 import Foundation
 
+/// Site Creation Notification
+///
+extension NSNotification.Name {
+    static let WPSiteCreated = NSNotification.Name(rawValue: "SiteCreated")
+}
+
 // MARK: - EnhancedSiteCreationService
 
 /// Working implementation of a `SiteAssemblyService`.
 ///
-final class EnhancedSiteCreationService: LocalCoreDataService, SiteAssemblyService {
+final class EnhancedSiteCreationService: SiteAssemblyService {
 
     // MARK: Properties
 
@@ -27,21 +33,17 @@ final class EnhancedSiteCreationService: LocalCoreDataService, SiteAssemblyServi
     /// The most recently created blog corresponding to the site creation request; `nil` otherwise.
     private(set) var createdBlog: Blog?
 
-    // MARK: LocalCoreDataService
+    private var coreDataStack: CoreDataStackSwift
 
-    override init(managedObjectContext context: NSManagedObjectContext) {
-        self.accountService = AccountService(managedObjectContext: context)
-        self.blogService = BlogService(managedObjectContext: context)
+    init(coreDataStack: CoreDataStackSwift) {
+        self.coreDataStack = coreDataStack
+        self.accountService = AccountService(coreDataStack: coreDataStack)
+        self.blogService = BlogService(coreDataStack: coreDataStack)
 
-        let api: WordPressComRestApi
-        if let wpcomApi = accountService.defaultWordPressComAccount()?.wordPressComRestApi {
-            api = wpcomApi
-        } else {
-            api = WordPressComRestApi.defaultApi(userAgent: WPUserAgent.wordPress())
-        }
+        let api: WordPressComRestApi = coreDataStack.performQuery { context in
+            (try? WPAccount.lookupDefaultWordPressComAccount(in: context))?.wordPressComRestApi
+        } ?? WordPressComRestApi.defaultApi(userAgent: WPUserAgent.wordPress())
         self.remoteService = WordPressComServiceRemote(wordPressComRestApi: api)
-
-        super.init(managedObjectContext: context)
     }
 
     // MARK: SiteAssemblyService
@@ -90,6 +92,7 @@ final class EnhancedSiteCreationService: LocalCoreDataService, SiteAssemblyServi
         // Here we designate the new site as the last used, so that it will be presented post-creation
         if let siteUrl = createdBlog?.url {
             RecentSitesService().touch(site: siteUrl)
+            NotificationCenter.default.post(name: .WPSiteCreated, object: nil)
         }
 
         currentStatus = .succeeded
@@ -115,8 +118,15 @@ final class EnhancedSiteCreationService: LocalCoreDataService, SiteAssemblyServi
 
                     return
                 }
-
-                self.synchronize(createdSite: response.createdSite)
+                self.coreDataStack.performAndSave({ context in
+                    self.createSite(for: response.createdSite, in: context)
+                }, completion: { [weak self] blogID in
+                    guard let blogID else {
+                        self?.endFailedAssembly()
+                        return
+                    }
+                    self?.syncBlogAndAccount(createdBlogID: blogID)
+                }, on: .main)
             case .failure(let creationError):
                 DDLogError("\(creationError)")
                 self.endFailedAssembly()
@@ -124,19 +134,18 @@ final class EnhancedSiteCreationService: LocalCoreDataService, SiteAssemblyServi
         }
     }
 
-    private func synchronize(createdSite: CreatedSite) {
-        guard let defaultAccount = accountService.defaultWordPressComAccount() else {
-            endFailedAssembly()
-            return
+    private func createSite(for createdSite: CreatedSite, in context: NSManagedObjectContext) -> NSManagedObjectID? {
+        guard let defaultAccount = try? WPAccount.lookupDefaultWordPressComAccount(in: context) else {
+            return nil
         }
 
         let xmlRpcUrlString = createdSite.xmlrpcString
 
         let blog: Blog
-        if let existingBlog = blogService.findBlog(withXmlrpc: xmlRpcUrlString, in: defaultAccount) {
+        if let existingBlog = Blog.lookup(xmlrpc: xmlRpcUrlString, andRemoveDuplicateBlogsOf: defaultAccount, in: context) {
             blog = existingBlog
         } else {
-            blog = blogService.createBlog(with: defaultAccount)
+            blog = Blog.createBlankBlog(with: defaultAccount)
             blog.xmlrpc = xmlRpcUrlString
         }
 
@@ -153,19 +162,35 @@ final class EnhancedSiteCreationService: LocalCoreDataService, SiteAssemblyServi
 
         defaultAccount.defaultBlog = blog
 
-        ContextManager.sharedInstance().save(managedObjectContext) { [weak self] in
-            guard let self = self else {
+        try? context.obtainPermanentIDs(for: [blog])
+
+        return blog.objectID
+    }
+
+    private func syncBlogAndAccount(createdBlogID blogID: NSManagedObjectID) {
+        assert(Thread.isMainThread, "\(#function) must be called from the main thread")
+
+        guard let blog = try? self.coreDataStack.mainContext.existingObject(with: blogID) as? Blog else {
+            endFailedAssembly()
+            return
+        }
+
+        blogService.syncBlogAndAllMetadata(blog, completionHandler: {
+            assert(Thread.isMainThread, "must be called from the main thread")
+            guard let defaultAccount = try? WPAccount.lookupDefaultWordPressComAccount(in: self.coreDataStack.mainContext) else {
+                self.endFailedAssembly()
                 return
             }
-            self.blogService.syncBlogAndAllMetadata(blog, completionHandler: {
-                self.accountService.updateUserDetails(for: defaultAccount,
-                                                      success: {
-                                                        self.createdBlog = blog
-                                                        self.endSuccessfulAssembly()
+
+            self.accountService.updateUserDetails(
+                for: defaultAccount,
+                success: {
+                    self.createdBlog = blog
+                    self.endSuccessfulAssembly()
                 },
-                                                      failure: { error in self.endFailedAssembly() })
-            })
-        }
+                failure: { error in self.endFailedAssembly() }
+            )
+        })
     }
 
     private func validatePendingRequest() {

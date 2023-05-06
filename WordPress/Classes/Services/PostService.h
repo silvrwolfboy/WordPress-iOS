@@ -7,6 +7,7 @@
 @class Post;
 @class Page;
 @class RemotePost;
+@class RemoteUser;
 @class PostServiceRemoteFactory;
 @class PostServiceUploadingList;
 
@@ -24,15 +25,11 @@ extern const NSUInteger PostServiceDefaultNumberToSync;
 
 @interface PostService : LocalCoreDataService
 
+// This is public so it can be accessed from Swift extensions.
+@property (nonnull, strong, nonatomic) PostServiceRemoteFactory *postServiceRemoteFactory;
+
 - (instancetype)initWithManagedObjectContext:(NSManagedObjectContext *)context
                     postServiceRemoteFactory:(PostServiceRemoteFactory *)postServiceRemoteFactory NS_DESIGNATED_INITIALIZER;
-
-- (Post *)createDraftPostForBlog:(Blog *)blog;
-- (Page *)createDraftPageForBlog:(Blog *)blog;
-
-- (AbstractPost *)findPostWithID:(NSNumber *)postID inBlog:(Blog *)blog;
-
-- (NSUInteger)countPostsWithoutRemote;
 
 /**
  Sync a specific post from the API
@@ -46,13 +43,6 @@ extern const NSUInteger PostServiceDefaultNumberToSync;
               forBlog:(Blog *)blog
               success:(void (^)(AbstractPost *post))success
               failure:(void (^)(NSError *))failure;
-
-/**
- Get all posts that failed to upload.
- 
- @param result a block that will be invoked to return the requested posts.
- */
-- (void)getFailedPosts:(nonnull void (^)( NSArray<AbstractPost *>* _Nonnull posts))result;
 
 /**
  Sync an initial batch of posts from the specified blog.
@@ -169,6 +159,13 @@ forceDraftIfCreating:(BOOL)forceDraftIfCreating
 - (void)restorePost:(AbstractPost *)post
            success:(nullable void (^)(void))success
            failure:(void (^)(NSError * _Nullable error))failure;
+
+/**
+ Creates a RemotePost from an AbstractPost to be used for API calls.
+
+ @param post The AbstractPost used to create the RemotePost
+ */
+- (RemotePost *)remotePostWithPost:(AbstractPost *)post;
 
 @end
 

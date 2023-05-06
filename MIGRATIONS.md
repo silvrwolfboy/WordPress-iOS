@@ -3,6 +3,449 @@
 This file documents changes in the data model. Please explain any changes to the
 data model as well as any custom migrations.
 
+## WordPress 148
+
+@momozw 2023-02-20
+
+- `Blog`: added `isBlazeApproved` attribute. (required, default `NO`, `Boolean`)
+
+@salimbraksa 2023-02-22
+
+- Created a new entity `BlockedAuthor` with:
+    - `accountID` (required, no default, `Int 64`)
+    - `authorID` (required, no default, `Int 64`)
+
+## WordPress 147
+
+@salimbraksa 2023-02-04
+
+- Created a new entity `BlockedSite` with:
+    - `accountID` (required, no default, `Int 64`)
+    - `blogID` (required, no default, `Int 64`)
+
+## WordPress 146
+
+@salimbraksa 2023-01-31
+
+- `ManagedAccountSettings`: added `twoStepEnabled` attribute. ( required, default `NO`, `Boolean`)
+
+## WordPress 145
+
+@geriux 2022-07-08
+
+- `Media`: added `remoteLargeURL` attribute. (optional, no default, `String`)
+- `Media`: added `remoteMediumURL` attribute. (optional, no default, `String`)
+
+## WordPress 144
+
+ @salimbraksa 2022-07-07
+
+ - `UserSuggestion`: added `userID` attribute. (optional, no default, `Int 64`)
+
+## WordPress 143
+
+@wargcm 2022-06-01 (@scoutharris 2022-05-24)
+
+- `Post`: added `bloggingPromptID` attribute. (optional, no default, `String`)
+
+## WordPress 142
+
+@dvdchr 2022-05-31
+
+- Updated `BloggingPrompt`:
+    - `displayAvatarURLs` now uses `NSSecureUnarchiveFromData` as `Transformer`.
+
+## WordPress 141
+
+@wargcm 2022-05-23
+
+- Created a new entity `BloggingPromptSettings` with:
+    - `isPotentialBloggingSite` (required, default `NO`, `Boolean`)
+    - `promptCardEnabled` (required, default `YES`, `Boolean`)
+    - `promptRemindersEnabled` (required, default `NO`, `Boolean`)
+    - `reminderTime` (required, default empty string, `String`)
+    - `siteID` (required, default `0`, `Int 32`)
+    - `reminderDays` one-to-one mapping to `BloggingPromptSettingsReminderDays`
+- Created a new entity `BloggingPromptSettingsReminderDays` with:
+    - `monday` (required, default `NO`, `Boolean`)
+    - `tuesday` (required, default `NO`, `Boolean`)
+    - `wednesday` (required, default `NO`, `Boolean`)
+    - `thursday` (required, default `NO`, `Boolean`)
+    - `friday` (required, default `NO`, `Boolean`)
+    - `saturday` (required, default `NO`, `Boolean`)
+    - `sunday` (required, default `NO`, `Boolean`)
+    - `settings` one-to-one mapping to `BloggingPromptSettings`
+
+## WordPress 140
+
+@dvdchr 2022-05-13
+
+- Created a new entity `BloggingPrompt` with:
+    - `promptID` (required, default `0`, `Int 32`)
+    - `siteID` (required, default `0`, `Int 32`)
+    - `text` (required, default empty string, `String`)
+    - `title` (required, default empty string, `String`)
+    - `content` (required, default empty string, `String`)
+    - `attribution` (required, default empty string, `String`)
+    - `date` (optional, no default, `Date`)
+    - `answered` (required, default `NO`, `Boolean`)
+    - `answerCount` (required, default `0`, `Int 32`)
+    - `displayAvatarURLs` (optional, no default, `Transformable` with type `[URL]`)
+
+## WordPress 138
+
+@dvdchr 2022-03-07
+
+- `Comment`: added `visibleOnReader` attribute. (required, default `true`, `Boolean`)
+
+## WordPress 137
+
+@dvdchr 2021-11-26
+
+- `Comment`: added `authorID` attribute. (optional, default `0`, `Int 32`)
+
+## WordPress 134
+
+@dvdchr 2021-10-14
+
+- `ReaderPost`: added `receivesCommentNotifications` attribute. (required, default `false`, `Boolean`)
+
+## WordPress 132
+
+@momo-ozawa 2021-08-19
+
+- `Post`: deleted `geolocation` attribute
+- `Post`: deleted `latitudeID` attribute
+- `Post`: deleted `longitudeID` attribute
+
+## WordPress 131
+
+@scoutharris 2021-08-04
+
+- `Comment`: set `author_ip` default value to empty string
+
+## WordPress 130
+
+@scoutharris 2021-08-03
+
+- `Comment`: set attribute default values
+  - `author`: empty string
+  - `author_email`: empty string
+  - `author_url`: empty string
+  - `authorAvatarURL`: empty string
+  - `commentID`: 0
+  - `content`: empty string
+  - `hierarchy`: empty string
+  - `isLiked`: `NO`
+  - `link`: empty string
+  - `parentID`: 0
+  - `postID`: 0
+  - `postTitle`: empty string
+  - `status`: empty string
+  - `type`: `comment`
+
+## WordPress 129
+
+@scoutharris 2021-07-29
+
+- `Comment`: set `rawContent` attribute as optional. Self-hosted does not have this property.
+
+## WordPress 128
+
+@scoutharris 2021-07-27
+
+- `Comment`: added `rawContent` attribute. (required, default empty string, `String`)
+
+## WordPress 127
+
+@chipsnyder 2021-07-1
+
+- `BlockEditorSettings`: added the attribute
+    - `rawStyles` (optional, no default, `String`)
+    - `rawFeatures` (optional, no default, `String`)
+    
+- `BlockEditorSettingElement`: added the attribute
+    - `order` (required, 0, `Int`)
+
+## WordPress 126
+
+@scoutharris 2021-06-28
+
+- `Comment`: added  `canModerate` attribute. (required, default `false`, `Boolean`)
+
+## WordPress 125
+
+@aerych 2021-06-04
+
+- `ReaderPost`: added  `canSubscribeComments` attribute. (required, default `false`, `Boolean`)
+- `ReaderPost`: added  `isSubscribedComments` attribute. (required, default `false`, `Boolean`)
+
+## WordPress 124
+
+@scoutharris 2021-05-07
+
+- `LikeUser`: added  `dateFetched` attribute.
+
+## WordPress 123
+
+@scoutharris 2021-04-28
+
+- Added new attributes to `LikeUser`:
+  - `likedSiteID`
+  - `likedPostID`
+  - `likedCommentID`
+- Corrected spelling of  `dateLikedString`  
+
+## WordPress 122
+
+@scoutharris 2021-04-23
+
+- Added new entities:
+- `LikeUser`
+- `LikeUserPreferredBlog`
+- Created one-to-one relationship between `LikeUser` and `LikeUserPreferredBlog`
+
+## WordPress 121
+
+@twstokes 2021-04-21
+
+- `BlogAuthor`: added the attribute
+    - `deletedFromBlog` (required, default `NO`, `Boolean`)
+
+## WordPress 120
+
+@chipsnyder 2021-04-12
+
+- Created a new entity `BlockEditorSettings` with:
+  - `isFSETheme` (required, default `false`, `Boolean`) FSE = "Full Site Editing"
+  - `lastUpdated` (required, no default, `Date`)
+
+- Created a new entity `BlockEditorSettingElement` with:
+  - `type` (required, no default, `String`)
+  - `value` (required, no default, `String`)
+  - `slug` (required, no default, `String`)
+  - `name` ( required, no default, `String`)
+
+- Created one-to-many relationship between `BlockEditorSettings` and `BlockEditorSettingElement`
+  - `BlockEditorSettings`
+    - `elements` (optional, to-many, cascade on delete)
+  - `BlockEditorSettingElement`
+    - `settings` (required, to-one, nullify on delete)
+
+- Created one-to-one relationship between `Blog` and `BlockEditorSettings`
+  - `BlockEditorSettings`
+    - `blockEditorSettings` (optional, to-one, cascade on delete)
+  - `BlockEditorSettings`
+    - `blog` (required, to-one, nullify on delete)
+
+## WordPress 119
+
+@mkevins 2021-03-31
+
+- `PageTemplateCategory`: added the attribute
+    - `ordinal` as Int64 (non-optional)
+
+## WordPress 118
+
+@chipsnyder 2021-03-26
+
+- `PageTemplateLayout`: set default values on:
+    - `demoUrl` to Empty String
+    - `previewTablet` to Empty String
+    - `previewMobile` to Empty String
+
+## WordPress 117
+
+@mkevins 2021-03-17
+
+- `PageTemplateLayout`: added the attributes
+    - `demoUrl` as string
+    - `previewTablet` as string
+    - `previewMobile` as string
+
+## WordPress 116
+
+@ceyhun 2021-03-15
+
+- `BlogSettings`: renamed `commentsFromKnownUsersWhitelisted` to `commentsFromKnownUsersAllowlisted`
+- `BlogSettings`: renamed `jetpackLoginWhiteListedIPAddresses` to `jetpackLoginAllowListedIPAddresses`
+- `BlogSettings`: renamed `commentsBlacklistKeys` to `commentsBlocklistKeys`
+
+## WordPress 115
+
+@mindgraffiti 2021-03-10
+
+- Added `blockEmailNotifications` is attribute to `AccountSettings` entity.
+
+## WordPress 114
+
+@aerych 2021-02-25
+
+- Changes Blog inviteLinks relation deletion rule to cascade.
+
+## WordPress 113
+
+@aerych 2021-02-19
+
+- Added `InviteLinks` entity.
+
+## WordPress 112
+
+@scoutharris 2021-01-29
+
+- `ReaderPost`: added  `isSeenSupported` attribute.
+- `ReaderPost`: changed default value of  `isSeen` to `true`.
+
+## WordPress 111
+
+@scoutharris 2021-01-14
+
+- Added `isSeen` attribute to  `ReaderPost` entity.
+
+## WordPress 110
+
+@emilylaguna 2021-01-05
+
+- Removed an invalid relationship to `ReaderSiteTopic.sites` from the `Comment` entity
+
+## WordPress 109
+
+@mindgraffiti 2020-12-15
+
+- Added `unseenCount` attribute to  `ReaderSiteTopic` entity
+
+## WordPress 108
+
+@scoutharris 2020-12-14
+
+- `ReaderTeamTopic`: added `organizationID`.
+- `ReaderSiteTopic`: made  `organizationID` non-optional.
+- `ReaderPost`: made  `organizationID` non-optional.  
+
+## WordPress 107
+
+@scoutharris 2020-12-09
+
+- `ReaderSiteTopic`: removed `isWPForTeams`, added `organizationID`.
+- `ReaderPost`: removed `isWPForTeams`, added `organizationID`.  
+
+## WordPress 106
+
+@mindgraffiti 2020-12-07
+
+- Added `isWPForTeams` property to `ReaderSiteTopic`.
+
+## WordPress 105
+
+@scoutharris 2020-12-04
+
+- Added `isWPForTeams` property to  `ReaderPost`.
+
+## WordPress 104
+
+@frosty 2020-12-03
+
+- Set the following `Transformable` properties to use the `NSSecureUnarchiveFromData`:
+  - AbstractPost.revisions
+  - Blog.capabilities
+  - Blog.options
+  - Blog.postFormats
+  - MenuItem.classes
+  - Notification.body
+  - Notification.header
+  - Notification.meta
+  - Notification.subject
+  - Post.disabledPublicizeConnections
+  - Theme.tags
+- Set custom transformers on the following properties:
+  - BlogSettings.commentsBlacklistKeys -> SetValueTransformer
+  - BlogSettings.commentsModerationKeys -> SetValueTransformer
+  - BlogSettings.jetpackLoginWhiteListedIPAddresses -> SetValueTransformer
+  - Media.error -> NSErrorValueTransformer
+  - Post.geolocation -> LocationValueTransformer
+
+## WordPress 103
+
+@guarani 2020-11-25
+
+- Add a new `SiteSuggestion` entity to support Gutenberg's xpost implementation
+- Add a one-to-many relationship between `Blog` and `SiteSuggestion`
+
+## WordPress 102
+
+@chipsnyder 2020-10-20
+
+- Added one-to-many relationship between `Blog` and `PageTemplateCategory`
+  - `Blog`
+    - `pageTemplateCategories` (optional, to-many, cascade on delete)
+  - `PageTemplateCategory`
+    - `blog` (required, to-one, nullify on delete)
+
+- Updated the many-to-many relationship between `PageTemplateLayout` and `PageTemplateCategory`
+  - `PageTemplateLayout`
+    - `categories` (optional, to-many, nullify on delete)
+  - `PageTemplateCategory`
+  - `layouts` (optional, to-many, ***cascade*** on delete)
+
+## WordPress 101
+
+@emilylaguna 2020-10-09
+- Add a relationship between `ReaderCard` and `ReaderSiteTopic`
+
+## WordPress 100
+
+@guarani 2020-10-09
+
+- Add a new `UserSuggestion` entity
+- Add a one-to-many relationship between `Blog` and `UserSuggestion`
+
+## WordPress 99
+
+@chipsnyder 2020-10-05
+
+- Created a new entity `PageTemplateCategory` with:
+  - `desc` (optional, `String`) short for "description"
+  - `emoji` (optional, `String`)
+  - `slug` (required, no default, `String`)
+  - `title` ( required, no default, `String`)
+- Created a new entity `PageTemplateLayout` with:
+  - `content` (required, no default, `String`)
+  - `preview` (required, no default, `String`)
+  - `slug` (required, no default, `String`)
+  - `title` ( required, no default, `String`)
+
+- Created many-to-many relationship between `PageTemplateLayout` and `PageTemplateCategory`
+  - `PageTemplateLayout`
+    - `categories` (optional, to-many, nullify on delete)
+  - `PageTemplateCategory`
+    - `layouts` (optional, to-many, nullify on delete)
+
+## WordPress 98
+
+@leandrowalonso 2020-07-27
+
+- Add a new `ReaderCard` entity
+- Add a relationship between `ReaderCard` and `ReaderPost`
+- Add a relationship between `ReaderCard` and `ReaderTagTopic`
+
+## WordPress 97
+
+@aerych 2020-06-17
+
+- All stats entities were reviewed for consistency of Optional settings for strings and dates and default values for scalar numerical fields.
+- Categories entity updated to make numeric fields scalar and non-optional.
+
+## WordPress 96
+
+@Gio2018 2020-06-12
+
+- Add fields `supportPriority`, `supportName` and `nonLocalizedShortname` to the `Plan` entity for Zendesk integration.
+
+## WordPress 95
+
+@aerych 2020-03-21
+
+- `ReaderPost` added the property `isBlogAtomic` (optional, `Boolean`).
 
 ## WordPress 94
 
@@ -20,7 +463,7 @@ data model as well as any custom migrations.
 
 @jklausa 2019-08-19
 
-- `AbstractPost`: Addded a  `confirmedChangesHash` (`nullable` `String`)  and  `confirmedChangesTimestamp` (`nullable` `Date`)  properties. 
+- `AbstractPost`: Addded a  `confirmedChangesHash` (`nullable` `String`)  and  `confirmedChangesTimestamp` (`nullable` `Date`)  properties.
 
 @leandroalonso 2019-09-27
 
@@ -34,7 +477,7 @@ data model as well as any custom migrations.
 ## WordPress 91
 
 @aerych 2019-10-15
-- `WPAccount` added `primaryBlogID` property. 
+- `WPAccount` added `primaryBlogID` property.
 
 ## WordPress 90
 
@@ -63,8 +506,8 @@ data model as well as any custom migrations.
 * `StatsRecordValue`
 * `StatsRecord`
 
-* `AllTimeStatsRecordValue` 
-* `AnnualAndMostPopularTimeStatsRecordValue` 
+* `AllTimeStatsRecordValue`
+* `AnnualAndMostPopularTimeStatsRecordValue`
 * `ClicksStatsRecordValue`
 * `CountryStatsRecordValue`
 * `FollowersStatsRecordValue`

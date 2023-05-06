@@ -1,19 +1,9 @@
 #import "EditCommentViewController.h"
-#import "CommentViewController.h"
 #import "CommentService.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 
 #import <WordPressUI/WordPressUI.h>
 #import "WordPress-Swift.h"
-
-
-
-#pragma mark ==========================================================================================
-#pragma mark Constants
-#pragma mark ==========================================================================================
-
-static UIEdgeInsets EditCommentInsetsPad = {5, 15, 5, 13};
-static UIEdgeInsets EditCommentInsetsPhone = {5, 10, 5, 11};
 
 
 #pragma mark ==========================================================================================
@@ -21,9 +11,10 @@ static UIEdgeInsets EditCommentInsetsPhone = {5, 10, 5, 11};
 #pragma mark ==========================================================================================
 
 @interface EditCommentViewController()
-@property (readwrite, nonatomic, weak) IBOutlet UITextView     *textView;
+@property (readwrite, nonatomic, weak) IBOutlet UITextView *textView;
+@property (readwrite, nonatomic, weak) IBOutlet UILabel *placeholderLabel;
 @property (nonatomic, strong) NSString *pristineText;
-@property (nonatomic, assign) CGRect   keyboardFrame;
+@property (readwrite, nonatomic, assign) CGRect keyboardFrame;
 
 - (void)handleKeyboardDidShow:(NSNotification *)notification;
 - (void)handleKeyboardWillHide:(NSNotification *)notification;
@@ -76,13 +67,10 @@ static UIEdgeInsets EditCommentInsetsPhone = {5, 10, 5, 11};
     [super viewDidLoad];
 
     self.title = NSLocalizedString(@"Edit Comment", @"");
-    
     self.view.backgroundColor = [UIColor murielBasicBackground];
-
-    self.textView.font = [WPStyleGuide regularTextFont];
-    self.textView.textContainerInset = [UIDevice isPad] ? EditCommentInsetsPad : EditCommentInsetsPhone;
     self.textView.backgroundColor = [UIColor murielBasicBackground];
     self.textView.textColor = [UIColor murielText];
+    self.placeholderLabel.textColor = [UIColor murielTextPlaceholder];
     
     [self showCancelBarButton];
     [self showSaveBarButton];
@@ -159,29 +147,28 @@ static UIEdgeInsets EditCommentInsetsPhone = {5, 10, 5, 11};
 
 - (void)handleKeyboardDidShow:(NSNotification *)notification
 {
-    NSTimeInterval animationDuration = [notification.userInfo[UIKeyboardAnimationDurationUserInfoKey] floatValue];
-    
-    _keyboardFrame = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
-    _keyboardFrame = [self.view convertRect:_keyboardFrame fromView:self.view.window];
-    
-    [UIView animateWithDuration:animationDuration animations:^{
-        CGRect frm = self.textView.frame;
-        frm.size.height = CGRectGetMinY(self.keyboardFrame);
-        self.textView.frame = frm;
-    }];
+    CGRect keyboardRect = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    self.keyboardFrame = keyboardRect;
+    CGSize kbSize = keyboardRect.size;
+
+    UIEdgeInsets contentInsets = UIEdgeInsetsMake(0.0, 0.0, kbSize.height, 0.0);
+    self.textView.contentInset = contentInsets;
+    self.textView.scrollIndicatorInsets = contentInsets;
+
+
+    // Scroll the active text field into view.
+    CGRect rect = [self.textView caretRectForPosition:self.textView.selectedTextRange.start];
+
+    [self.textView scrollRectToVisible:rect animated:NO];
 }
 
 - (void)handleKeyboardWillHide:(NSNotification *)notification
 {
-    NSTimeInterval animationDuration = [notification.userInfo[UIKeyboardAnimationDurationUserInfoKey] floatValue];
-    
-    [UIView animateWithDuration:animationDuration animations:^{
-        CGRect frm = self.textView.frame;
-        frm.size.height = CGRectGetMaxY(self.view.bounds);
-        self.textView.frame = frm;
-    }];
+    UIEdgeInsets contentInsets = UIEdgeInsetsMake(0.0, 0.0, 0, 0.0);
+    self.textView.contentInset = contentInsets;
+    self.textView.scrollIndicatorInsets = contentInsets;
+    self.keyboardFrame = CGRectZero;
 }
-
 
 #pragma mark - Text View Delegate Methods
 
@@ -207,7 +194,7 @@ static UIEdgeInsets EditCommentInsetsPhone = {5, 10, 5, 11};
                                 handler:nil];
     [alertController addActionWithTitle:NSLocalizedString(@"Discard", @"")
                                   style:UIAlertActionStyleDestructive
-                                handler:^(UIAlertAction *alertAction) {
+                                handler:^(UIAlertAction * __unused alertAction) {
                                     [self finishWithoutUpdates];
                                 }];
     alertController.popoverPresentationController.barButtonItem = self.navigationItem.leftBarButtonItem;

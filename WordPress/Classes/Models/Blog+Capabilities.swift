@@ -28,7 +28,7 @@ extension Blog {
     /// Returns true if a given capability is enabled. False otherwise
     ///
     public func isUserCapableOf(_ capability: Capability) -> Bool {
-        return capabilities?[capability.rawValue] as? Bool ?? false
+        return isUserCapableOf(capability.rawValue)
     }
 
     /// Returns true if the current user is allowed to list a Blog's Users
@@ -47,5 +47,37 @@ extension Blog {
     ///
     @objc public func isUploadingFilesAllowed() -> Bool {
         return isUserCapableOf(.UploadFiles)
+    }
+
+    /// Returns true if the current user is allowed to see Jetpack's Backups
+    ///
+    @objc public func isBackupsAllowed() -> Bool {
+        return isUserCapableOf("backup") || isUserCapableOf("backup-daily") || isUserCapableOf("backup-realtime")
+    }
+
+    /// Returns true if the current user is allowed to see Jetpack's Scan
+    ///
+    @objc public func isScanAllowed() -> Bool {
+        return !hasBusinessPlan && isUserCapableOf("scan")
+    }
+
+    /// Returns true if the current user is allowed to list and edit the blog's Pages
+    ///
+    @objc public func isListingPagesAllowed() -> Bool {
+        return isAdmin || isUserCapableOf(.EditPages)
+    }
+
+    /// Returns true if the current user is allowed to view Stats
+    ///
+    @objc public func isViewingStatsAllowed() -> Bool {
+        return isAdmin || isUserCapableOf(.ViewStats)
+    }
+
+    private func isUserCapableOf(_ capability: String) -> Bool {
+        return capabilities?[capability] as? Bool ?? false
+    }
+
+    public func areBloggingRemindersAllowed() -> Bool {
+        return Feature.enabled(.bloggingReminders) && isUserCapableOf(.EditPosts) && JetpackNotificationMigrationService.shared.shouldPresentNotifications()
     }
 }

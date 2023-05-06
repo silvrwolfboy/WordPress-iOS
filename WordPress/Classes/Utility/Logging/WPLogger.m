@@ -3,13 +3,29 @@
 
 @import CocoaLumberjack;
 
+DDLogLevel ddLogLevel = DDLogLevelInfo;
+
+void SetCocoaLumberjackObjCLogLevel(NSUInteger ddLogLevelRawValue)
+{
+    ddLogLevel = (DDLogLevel)ddLogLevelRawValue;
+}
+
 @interface WPLogger ()
-@property (nonatomic, strong, readwrite) DDFileLogger *fileLogger;
+@property (nonatomic, strong, readwrite) DDFileLogger * _Nonnull fileLogger;
 @end
 
 @implementation WPLogger
 
-#pragma mark - Inititlization
+#pragma mark - Initialization
+
++ (WPLogger *)shared {
+    static WPLogger *shared = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        shared = [[self alloc] init];
+    });
+    return shared;
+}
 
 - (instancetype)init
 {
@@ -92,10 +108,34 @@
     return description;
 }
 
+#pragma mark - Deleting
+
+- (void)deleteAllLogs
+{
+    NSArray *logFiles = self.fileLogger.logFileManager.sortedLogFileInfos;
+    for (DDLogFileInfo *logFileInfo in logFiles) {
+        [[NSFileManager defaultManager] removeItemAtPath:logFileInfo.filePath error:nil];
+    }
+    
+    DDLogWarn(@"All log files erased.");
+}
+
+- (void)deleteArchivedLogs
+{
+    NSArray *logFiles = self.fileLogger.logFileManager.sortedLogFileInfos;
+    for (DDLogFileInfo *logFileInfo in logFiles) {
+        if (logFileInfo.isArchived) {
+            [[NSFileManager defaultManager] removeItemAtPath:logFileInfo.filePath error:nil];
+        }
+    }
+    
+    DDLogWarn(@"All archived log files erased.");
+}
+
 #pragma mark - Public static methods
 
 + (void)configureLoggerLevelWithExtraDebug {
-    BOOL extraDebug = [[NSUserDefaults standardUserDefaults] boolForKey:@"extra_debug"];
+    BOOL extraDebug = [[UserPersistentStoreFactory userDefaultsInstance] boolForKey:@"extra_debug"];
     if (extraDebug) {
         [WordPressAppDelegate setLogLevel:DDLogLevelVerbose];
     } else {

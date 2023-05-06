@@ -8,7 +8,7 @@ extension NotificationsViewController {
 
     var shouldShowPrimeForPush: Bool {
         get {
-            return !UserDefaults.standard.notificationPrimerInlineWasAcknowledged
+            return !UserPersistentStoreFactory.instance().notificationPrimerInlineWasAcknowledged
         }
     }
 
@@ -20,6 +20,8 @@ extension NotificationsViewController {
             case .denied:
                 self?.setupWinback()
             default:
+                // The user has already allowed notifications so we set the inline prompt to acknowledged so it isn't called anymore
+                UserPersistentStoreFactory.instance().notificationPrimerInlineWasAcknowledged = true
                 break
             }
         }
@@ -41,10 +43,10 @@ extension NotificationsViewController {
             defer {
                 WPAnalytics.track(.pushNotificationPrimerAllowTapped, withProperties: [Analytics.locationKey: Analytics.inlineKey])
             }
-            InteractiveNotificationsManager.shared.requestAuthorization {
+            InteractiveNotificationsManager.shared.requestAuthorization { _ in
                 DispatchQueue.main.async {
                     self?.hideInlinePrompt(delay: 0.0)
-                    UserDefaults.standard.notificationPrimerInlineWasAcknowledged = true
+                    UserPersistentStoreFactory.instance().notificationPrimerInlineWasAcknowledged = true
                 }
             }
         }
@@ -54,7 +56,7 @@ extension NotificationsViewController {
                 WPAnalytics.track(.pushNotificationPrimerNoTapped, withProperties: [Analytics.locationKey: Analytics.inlineKey])
             }
             self?.hideInlinePrompt(delay: 0.0)
-            UserDefaults.standard.notificationPrimerInlineWasAcknowledged = true
+            UserPersistentStoreFactory.instance().notificationPrimerInlineWasAcknowledged = true
         }
 
         // We _seriously_ need to call the following method at last.
@@ -65,9 +67,9 @@ extension NotificationsViewController {
 
     private func setupWinback() {
         // only show the winback for folks that denied without seeing the post-login primer: aka users of a previous version
-        guard !UserDefaults.standard.notificationPrimerAlertWasDisplayed else {
+        guard !UserPersistentStoreFactory.instance().notificationPrimerAlertWasDisplayed else {
             // they saw the primer, and denied us. they aren't coming back, we aren't bothering them anymore.
-            UserDefaults.standard.notificationPrimerInlineWasAcknowledged = true
+            UserPersistentStoreFactory.instance().notificationPrimerInlineWasAcknowledged = true
             return
         }
 
@@ -91,7 +93,7 @@ extension NotificationsViewController {
             self?.hideInlinePrompt(delay: 0.0)
             let targetURL = URL(string: UIApplication.openSettingsURLString)
             UIApplication.shared.open(targetURL!)
-            UserDefaults.standard.notificationPrimerInlineWasAcknowledged = true
+            UserPersistentStoreFactory.instance().notificationPrimerInlineWasAcknowledged = true
         }
 
         inlinePromptView.setupNoButton(title: noTitle) { [weak self] button in
@@ -99,24 +101,7 @@ extension NotificationsViewController {
                 WPAnalytics.track(.pushNotificationWinbackNoTapped, withProperties: [Analytics.locationKey: Analytics.inlineKey])
             }
             self?.hideInlinePrompt(delay: 0.0)
-            UserDefaults.standard.notificationPrimerInlineWasAcknowledged = true
-        }
-    }
-}
-
-// MARK: - User Defaults for Push Notifications
-
-extension UserDefaults {
-    private enum Keys: String {
-        case notificationPrimerInlineWasAcknowledged = "notificationPrimerInlineWasAcknowledged"
-    }
-
-    var notificationPrimerInlineWasAcknowledged: Bool {
-        get {
-            return bool(forKey: Keys.notificationPrimerInlineWasAcknowledged.rawValue)
-        }
-        set {
-            set(newValue, forKey: Keys.notificationPrimerInlineWasAcknowledged.rawValue)
+            UserPersistentStoreFactory.instance().notificationPrimerInlineWasAcknowledged = true
         }
     }
 }

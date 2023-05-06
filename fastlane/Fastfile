@@ -1,0 +1,129 @@
+# frozen_string_literal: true
+
+fastlane_require 'xcodeproj'
+fastlane_require 'dotenv'
+fastlane_require 'open-uri'
+fastlane_require 'git'
+
+UI.user_error!('Please run fastlane via `bundle exec`') unless FastlaneCore::Helper.bundler?
+
+########################################################################
+# Constants and Environment Variables
+########################################################################
+
+# Paths that are re-used across multiple lanes
+PROJECT_ROOT_FOLDER = File.dirname(File.expand_path(__dir__))
+WORKSPACE_PATH = File.join(PROJECT_ROOT_FOLDER, 'WordPress.xcworkspace')
+DERIVED_DATA_PATH = File.join(PROJECT_ROOT_FOLDER, 'DerivedData')
+BUILD_PRODUCTS_PATH = File.join(PROJECT_ROOT_FOLDER, 'Artifacts')
+
+# Env file paths to load
+ENV_FILE_NAME = '.wpios-env.default'
+USER_ENV_FILE_PATH = File.join(Dir.home, ENV_FILE_NAME)
+SECRETS_DIR = File.join(Dir.home, '.configure', 'wordpress-ios', 'secrets')
+PROJECT_ENV_FILE_PATH = File.join(SECRETS_DIR, 'project.env')
+APP_STORE_CONNECT_KEY_PATH = File.join(SECRETS_DIR, 'app_store_connect_fastlane_api_key.json')
+
+# Other defines used across multiple lanes
+REPOSITORY_NAME = 'WordPress-iOS'
+
+WORDPRESS_BUNDLE_IDENTIFIER = 'org.wordpress'
+WORDPRESS_EXTENSIONS_BUNDLE_IDENTIFIERS = %w[
+  WordPressShare
+  WordPressDraftAction
+  WordPressStatsWidgets
+  WordPressNotificationServiceExtension
+  WordPressNotificationContentExtension
+  WordPressIntents
+].map { |suffix| "#{WORDPRESS_BUNDLE_IDENTIFIER}.#{suffix}" }
+ALL_WORDPRESS_BUNDLE_IDENTIFIERS = [WORDPRESS_BUNDLE_IDENTIFIER, *WORDPRESS_EXTENSIONS_BUNDLE_IDENTIFIERS].freeze
+
+JETPACK_BUNDLE_IDENTIFIER = 'com.automattic.jetpack'
+JETPACK_EXTENSIONS_BUNDLE_IDENTIFIERS = %w[
+  JetpackShare
+  JetpackDraftAction
+  JetpackStatsWidgets
+  JetpackNotificationServiceExtension
+  JetpackIntents
+].map { |suffix| "#{JETPACK_BUNDLE_IDENTIFIER}.#{suffix}" }
+ALL_JETPACK_BUNDLE_IDENTIFIERS = [JETPACK_BUNDLE_IDENTIFIER, *JETPACK_EXTENSIONS_BUNDLE_IDENTIFIERS].freeze
+
+# Environment Variables — used by lanes but also potentially actions
+Dotenv.load(USER_ENV_FILE_PATH)
+Dotenv.load(PROJECT_ENV_FILE_PATH)
+GITHUB_REPO = 'wordpress-mobile/wordpress-iOS'
+ENV['PROJECT_NAME'] = 'WordPress'
+ENV['PUBLIC_CONFIG_FILE'] = File.join(PROJECT_ROOT_FOLDER, 'config', 'Version.Public.xcconfig')
+ENV['INTERNAL_CONFIG_FILE'] = File.join(PROJECT_ROOT_FOLDER, 'config', 'Version.internal.xcconfig')
+ENV['PROJECT_ROOT_FOLDER'] = "#{PROJECT_ROOT_FOLDER}/"
+ENV['APP_STORE_STRINGS_FILE_NAME'] = 'AppStoreStrings.po'
+ENV['FASTLANE_WWDR_USE_HTTP1_AND_RETRIES'] = 'true'
+
+# Use this instead of getting values from ENV directly. It will throw an error if the requested value is missing
+def get_required_env(key)
+  UI.user_error!("Environment variable '#{key}' is not set. Have you setup #{USER_ENV_FILE_PATH} correctly?") unless ENV.key?(key)
+  ENV.fetch(key, nil)
+end
+
+
+########################################################################
+# Group buildkite logs by action
+########################################################################
+
+# A module that defines methods to be used as overrides to `Fastlane::Actions`
+# module methods.
+module FastlaneActionLogGroup
+  def print_group(action_name)
+    return if %w[is_ci].include?(action_name)
+
+    puts "~~~ :fastlane: #{ENV.fetch('FASTLANE_LANE_NAME', '[root]')} >> #{action_name}"
+  end
+
+  def execute_action(action_name)
+    print_group(action_name)
+    super(action_name)
+  end
+end
+
+if ENV.key?('BUILDKITE')
+  Fastlane::Actions.singleton_class.class_eval do
+    prepend FastlaneActionLogGroup
+  end
+end
+
+########################################################################
+# Imports domain-specific lanes
+########################################################################
+
+import 'lanes/build.rb'
+import 'lanes/codesign.rb'
+import 'lanes/localization.rb'
+import 'lanes/release.rb'
+import 'lanes/screenshots.rb'
+
+########################################################################
+
+default_platform(:ios)
+
+before_all do |lane|
+  # Skip these checks/steps for test lane (not needed for testing)
+  next if lane == :test_without_building
+
+  # Ensure we use the latest version of the toolkit
+  check_for_toolkit_updates unless is_ci || ENV['FASTLANE_SKIP_TOOLKIT_UPDATE_CHECK']
+
+  # Fixes weird Keychain bugs
+  setup_ci
+
+  # Check that the env files exist
+  # rubocop:disable Style/IfUnlessModifier
+  unless is_ci || File.file?(USER_ENV_FILE_PATH)
+    example_path = 'fastlane/env/user.env-example '
+    UI.user_error! "#{ENV_FILE_NAME} not found: Please copy #{example_path} to #{USER_ENV_FILE_PATH} and fill in the values."
+  end
+
+  unless File.file?(PROJECT_ENV_FILE_PATH)
+    UI.user_error!("project.env not found at #{PROJECT_ENV_FILE_PATH}: Make sure your configuration is up to date with `rake dependencies`")
+  end
+  # rubocop:enable Style/IfUnlessModifier
+end

@@ -2,7 +2,6 @@
 #import <XCTest/XCTest.h>
 
 #import "AccountService.h"
-#import "ApiCredentials.h"
 #import "WPAppAnalytics.h"
 #import "WPAnalyticsTrackerWPCom.h"
 @import OCMock;
@@ -24,7 +23,6 @@ typedef void(^OCMockInvocationBlock)(NSInvocation* invocation);
 
     id analyticsMock = [OCMockObject mockForClass:[WPAnalytics class]];
     id apiCredentialsMock = [OCMockObject mockForClass:[ApiCredentials class]];
-    id accountServiceMock = [OCMockObject mockForClass:[AccountService class]];
     
     OCMockInvocationBlock registerTrackerInvocationBlock = ^(NSInvocation *invocation) {
         __unsafe_unretained id<WPAnalyticsTracker> tracker = nil;
@@ -42,8 +40,7 @@ typedef void(^OCMockInvocationBlock)(NSInvocation* invocation);
         return @"TEST";
     };
     
-    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithAccountService:accountServiceMock
-                                                         lastVisibleScreenBlock:lastVisibleScreenCallback],
+    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithLastVisibleScreenBlock:lastVisibleScreenCallback],
                      @"Allocating or initializing this object shouldn't throw an exception");
     XCTAssert([analytics isKindOfClass:[WPAppAnalytics class]]);
     
@@ -57,7 +54,6 @@ typedef void(^OCMockInvocationBlock)(NSInvocation* invocation);
     
     id analyticsMock = [OCMockObject mockForClass:[WPAnalytics class]];
     id apiCredentialsMock = [OCMockObject mockForClass:[ApiCredentials class]];
-    id accountServiceMock = [OCMockObject mockForClass:[AccountService class]];
 
     [[analyticsMock reject] beginSession];
     
@@ -66,8 +62,7 @@ typedef void(^OCMockInvocationBlock)(NSInvocation* invocation);
         return @"TEST";
     };
     
-    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithAccountService:accountServiceMock
-                                                         lastVisibleScreenBlock:lastVisibleScreenCallback],
+    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithLastVisibleScreenBlock:lastVisibleScreenCallback],
                      @"Allocating or initializing this object shouldn't throw an exception");
     XCTAssert([analytics isKindOfClass:[WPAppAnalytics class]]);
 
@@ -80,15 +75,12 @@ typedef void(^OCMockInvocationBlock)(NSInvocation* invocation);
 
 - (void)testUserOptedOut
 {
-    id accountServiceMock = [OCMockObject mockForClass:[AccountService class]];
-
     WPAppAnalytics *analytics = nil;
     WPAppAnalyticsLastVisibleScreenCallback lastVisibleScreenCallback = ^NSString*{
         return @"TEST";
     };
 
-    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithAccountService:accountServiceMock
-                                                         lastVisibleScreenBlock:lastVisibleScreenCallback],
+    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithLastVisibleScreenBlock:lastVisibleScreenCallback],
                      @"Allocating or initializing this object shouldn't throw an exception");
     XCTAssert([analytics isKindOfClass:[WPAppAnalytics class]]);
 
@@ -99,15 +91,12 @@ typedef void(^OCMockInvocationBlock)(NSInvocation* invocation);
 
 - (void)testUserHasNotOptedOut
 {
-    id accountServiceMock = [OCMockObject mockForClass:[AccountService class]];
-
     WPAppAnalytics *analytics = nil;
     WPAppAnalyticsLastVisibleScreenCallback lastVisibleScreenCallback = ^NSString*{
         return @"TEST";
     };
 
-    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithAccountService:accountServiceMock
-                                                         lastVisibleScreenBlock:lastVisibleScreenCallback],
+    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithLastVisibleScreenBlock:lastVisibleScreenCallback],
                      @"Allocating or initializing this object shouldn't throw an exception");
     XCTAssert([analytics isKindOfClass:[WPAppAnalytics class]]);
 
@@ -121,15 +110,12 @@ typedef void(^OCMockInvocationBlock)(NSInvocation* invocation);
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:WPAppAnalyticsDefaultsUserOptedOut];
     [[NSUserDefaults standardUserDefaults] setBool:YES forKey:WPAppAnalyticsDefaultsKeyUsageTracking_deprecated];
 
-    id accountServiceMock = [OCMockObject mockForClass:[AccountService class]];
-
     WPAppAnalytics *analytics = nil;
     WPAppAnalyticsLastVisibleScreenCallback lastVisibleScreenCallback = ^NSString*{
         return @"TEST";
     };
 
-    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithAccountService:accountServiceMock
-                                                         lastVisibleScreenBlock:lastVisibleScreenCallback],
+    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithLastVisibleScreenBlock:lastVisibleScreenCallback],
                      @"Allocating or initializing this object shouldn't throw an exception");
     XCTAssert([analytics isKindOfClass:[WPAppAnalytics class]]);
 
@@ -141,19 +127,23 @@ typedef void(^OCMockInvocationBlock)(NSInvocation* invocation);
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:WPAppAnalyticsDefaultsUserOptedOut];
     [[NSUserDefaults standardUserDefaults] setBool:NO forKey:WPAppAnalyticsDefaultsKeyUsageTracking_deprecated];
 
-    id accountServiceMock = [OCMockObject mockForClass:[AccountService class]];
-
     WPAppAnalytics *analytics = nil;
     WPAppAnalyticsLastVisibleScreenCallback lastVisibleScreenCallback = ^NSString*{
         return @"TEST";
     };
 
-    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithAccountService:accountServiceMock
-                                                         lastVisibleScreenBlock:lastVisibleScreenCallback],
+    XCTAssertNoThrow(analytics = [[WPAppAnalytics alloc] initWithLastVisibleScreenBlock:lastVisibleScreenCallback],
                      @"Allocating or initializing this object shouldn't throw an exception");
     XCTAssert([analytics isKindOfClass:[WPAppAnalytics class]]);
 
     XCTAssertTrue([WPAppAnalytics userHasOptedOut]);
+}
+
+- (void)testSiteTypeForBlog
+{
+    NSString *siteType = [WPAppAnalytics siteTypeForBlogWithID: @99999999];
+    XCTAssertNotNil(siteType);
+    XCTAssertTrue([siteType isEqualToString:@"blog"]);
 }
 
 @end

@@ -2,23 +2,7 @@ import XCTest
 @testable import WordPress
 import Nimble
 
-class PostListFilterTests: XCTestCase {
-    private var contextManager: TestContextManager!
-    private var context: NSManagedObjectContext!
-
-    override func setUp() {
-        super.setUp()
-
-        contextManager = TestContextManager()
-        context = contextManager.newDerivedContext()
-    }
-
-    override func tearDown() {
-        super.tearDown()
-        context = nil
-        contextManager = nil
-    }
-
+class PostListFilterTests: CoreDataTestCase {
     func testSortDescriptorForPublished() {
         let filter = PostListFilter.publishedFilter()
         let descriptors = filter.sortDescriptors
@@ -92,8 +76,8 @@ class PostListFilterTests: XCTestCase {
         ]
 
         // Assert
-        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0!) == true })
-        expect(nonMatchingPosts).to(allPass { predicate.evaluate(with: $0!) == false })
+        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0) == true })
+        expect(nonMatchingPosts).to(allPass { predicate.evaluate(with: $0) == false })
     }
 
     func testDraftFilterIncludesExistingDraftsAndPendingPostsTransitionedToOtherStatuses() {
@@ -114,7 +98,7 @@ class PostListFilterTests: XCTestCase {
         ]
 
         // Assert
-        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0!) == true })
+        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0) == true })
     }
 
     func testPublishedFilterIncludesExistingPrivateAndRemotePublishedPosts() {
@@ -140,8 +124,8 @@ class PostListFilterTests: XCTestCase {
         ]
 
         // Assert
-        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0!) == true })
-        expect(nonMatchingPosts).to(allPass { predicate.evaluate(with: $0!) == false })
+        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0) == true })
+        expect(nonMatchingPosts).to(allPass { predicate.evaluate(with: $0) == false })
     }
 
     func testPublishedFilterIncludesExistingPublishedAndPrivatePostsTransitionedToOtherStatuses() {
@@ -162,7 +146,7 @@ class PostListFilterTests: XCTestCase {
         ]
 
         // Assert
-        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0!) == true })
+        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0) == true })
     }
 
     func testScheduledFilterIncludesExistingScheduledPostsOnly() {
@@ -187,8 +171,8 @@ class PostListFilterTests: XCTestCase {
         ]
 
         // Assert
-        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0!) == true })
-        expect(nonMatchingPosts).to(allPass { predicate.evaluate(with: $0!) == false })
+        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0) == true })
+        expect(nonMatchingPosts).to(allPass { predicate.evaluate(with: $0) == false })
     }
 
     func testScheduledFilterIncludesExistingScheduledPostsTransitionedToOtherStatuses() {
@@ -203,7 +187,7 @@ class PostListFilterTests: XCTestCase {
         ]
 
         // Assert
-        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0!) == true })
+        expect(matchingPosts).to(allPass { predicate.evaluate(with: $0) == true })
     }
 }
 
@@ -211,7 +195,7 @@ private extension PostListFilterTests {
     func createPost(_ status: BasePost.Status,
                     hasRemote: Bool = false,
                     statusAfterSync: BasePost.Status? = nil) -> Post {
-        let post = Post(context: context)
+        let post = Post(context: mainContext)
         post.status = status
         post.statusAfterSync = statusAfterSync
 

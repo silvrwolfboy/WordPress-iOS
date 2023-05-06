@@ -24,27 +24,23 @@ class ReaderReblogPresenter {
     }
 
     /// Presents the reblog screen(s)
-    func presentReblog(blogService: BlogService,
+    func presentReblog(coreDataStack: CoreDataStack,
                        readerPost: ReaderPost,
                        origin: UIViewController) {
-
-        let blogCount = blogService.blogCountVisibleForWPComAccounts()
+        let context = coreDataStack.mainContext
+        let blogCount = BlogQuery().visible(true).hostedByWPCom(true).count(in: context)
 
         switch blogCount {
         case 0:
             presentNoSitesScene(origin: origin)
         case 1:
-            guard let blog = blogService.visibleBlogsForWPComAccounts().first else {
+            guard let blog = try? BlogQuery().visible(true).hostedByWPCom(true).blog(in: context) else {
                 return
             }
             presentEditor(with: readerPost, blog: blog, origin: origin)
         default:
-            guard let blog = blogService.lastUsedOrFirstBlog() else {
-                return
-            }
             presentBlogPicker(from: origin,
-                              blog: blog,
-                              blogService: blogService,
+                              coreDataStack: coreDataStack,
                               readerPost: readerPost)
         }
     }
@@ -55,8 +51,7 @@ class ReaderReblogPresenter {
 private extension ReaderReblogPresenter {
     /// presents the blog picker before the editor, for users with multiple sites
     func presentBlogPicker(from origin: UIViewController,
-                           blog: Blog,
-                           blogService: BlogService,
+                           coreDataStack: CoreDataStack,
                            readerPost: ReaderPost) {
 
         let selectorViewController = BlogSelectorViewController(selectedBlogObjectID: nil,
@@ -70,7 +65,7 @@ private extension ReaderReblogPresenter {
         let navigationController = getNavigationController(selectorViewController)
 
         let successHandler: BlogSelectorSuccessHandler = { selectedObjectID in
-            guard let newBlog = blogService.managedObjectContext.object(with: selectedObjectID) as? Blog else {
+            guard let newBlog = coreDataStack.mainContext.object(with: selectedObjectID) as? Blog else {
                 return
             }
             navigationController.dismiss(animated: true) {
@@ -84,12 +79,7 @@ private extension ReaderReblogPresenter {
     /// returns an AdaptiveNavigationController with preconfigured modal presentation style
     func getNavigationController(_ controller: UIViewController) -> AdaptiveNavigationController {
         let navigationController = AdaptiveNavigationController(rootViewController: controller)
-        if #available(iOS 13.0, *) {
-            navigationController.modalPresentationStyle = .automatic
-        } else {
-            // suits both iPad and iPhone
-            navigationController.modalPresentationStyle = .pageSheet
-        }
+        navigationController.modalPresentationStyle = .automatic
         return navigationController
     }
 }
@@ -103,7 +93,7 @@ private extension ReaderReblogPresenter {
                                origin: UIViewController) {
 
         // get post and put content in it
-        let post = postService.createDraftPost(for: blog)
+        let post = blog.createDraftPost()
         // size used for photon url. Set height to 0 will preserve aspect ratio
         let photonSize = CGSize(width: min(origin.view.frame.width,
                                            origin.view.frame.height),

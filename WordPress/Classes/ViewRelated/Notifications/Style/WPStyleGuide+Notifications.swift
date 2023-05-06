@@ -10,7 +10,7 @@ extension WPStyleGuide {
         //
 
         // NoteTableViewHeader
-        public static let sectionHeaderBackgroundColor = UIColor.listBackground
+        public static let sectionHeaderBackgroundColor = UIColor.ungroupedListBackground
 
         public static var sectionHeaderRegularStyle: [NSAttributedString.Key: Any] {
             return  [.paragraphStyle: sectionHeaderParagraph,
@@ -18,19 +18,22 @@ extension WPStyleGuide {
                      .foregroundColor: sectionHeaderTextColor]
         }
 
-        // NoteTableViewCell
+        // ListTableViewCell
+        public static let unreadIndicatorColor = UIColor.primaryLight
+
+        // Notification cells
         public static let noticonFont               = UIFont(name: "Noticons", size: 16)
         public static let noticonTextColor          = UIColor.textInverted
         public static let noticonReadColor          = UIColor.listSmallIcon
         public static let noticonUnreadColor        = UIColor.primary
         public static let noticonUnmoderatedColor   = UIColor.warning
 
-        public static let noteBackgroundReadColor   = UIColor.listForeground
-        public static let noteBackgroundUnreadColor = UIColor.listForegroundUnread
+        public static let noteBackgroundReadColor   = UIColor.ungroupedListBackground
+        public static let noteBackgroundUnreadColor = UIColor.ungroupedListUnread
 
         public static let noteSeparatorColor        = blockSeparatorColor
 
-        // NoteUndoOverlayView
+        // Notification undo overlay
         public static let noteUndoBackgroundColor   = UIColor.error
         public static let noteUndoTextColor         = UIColor.white
         public static let noteUndoTextFont          = subjectRegularFont
@@ -42,9 +45,9 @@ extension WPStyleGuide {
                      .foregroundColor: subjectTextColor ]
         }
 
-        public static var subjectBoldStyle: [NSAttributedString.Key: Any] {
+        public static var subjectSemiBoldStyle: [NSAttributedString.Key: Any] {
             return [.paragraphStyle: subjectParagraph,
-                    .font: subjectBoldFont ]
+                    .font: subjectSemiBoldFont ]
         }
 
         public static var subjectItalicsStyle: [NSAttributedString.Key: Any] {
@@ -65,6 +68,13 @@ extension WPStyleGuide {
             return [.paragraphStyle: snippetParagraph,
                     .font: subjectRegularFont,
                     .foregroundColor: snippetColor ]
+        }
+
+        public static var headerDetailsRegularStyle: [NSAttributedString.Key: Any] {
+            return  [.paragraphStyle: snippetHeaderParagraph,
+                     .font: headerDetailsRegularFont,
+                     .foregroundColor: headerDetailsColor
+            ]
         }
 
         // MARK: - Styles used by NotificationDetailsViewController
@@ -102,14 +112,41 @@ extension WPStyleGuide {
         // Badges
         public static let badgeBackgroundColor      = UIColor.clear
         public static let badgeLinkColor            = blockLinkColor
+        public static let badgeTextColor            = blockTextColor
+        public static let badgeQuotedColor          = blockQuotedColor
 
-        public static let badgeRegularStyle: [NSAttributedString.Key: Any] = [.paragraphStyle: badgeParagraph,
-                                                                             .font: blockRegularFont,
-                                                                             .foregroundColor: blockTextColor]
+        public static let badgeRegularFont          = UIFont.preferredFont(forTextStyle: .body)
+        public static let badgeBoldFont             = badgeRegularFont.semibold()
+        public static let badgeItalicsFont          = badgeRegularFont.italic()
 
-        public static let badgeBoldStyle            = blockBoldStyle
-        public static let badgeItalicsStyle         = blockItalicsStyle
-        public static let badgeQuotedStyle          = blockQuotedStyle
+        public static let badgeTitleFont            = WPStyleGuide.serifFontForTextStyle(.title1)
+        public static let badgeTitleBoldFont        = badgeTitleFont.semibold()
+        public static let badgeTitleItalicsFont     = badgeTitleFont.italic()
+
+        public static var badgeRegularStyle: [NSAttributedString.Key: Any] {
+            badgeStyle(withFont: FeatureFlag.milestoneNotifications.enabled ? badgeRegularFont : blockRegularFont)
+        }
+
+        public static var badgeBoldStyle: [NSAttributedString.Key: Any] {
+            FeatureFlag.milestoneNotifications.enabled ? badgeStyle(withFont: badgeBoldFont) : blockBoldStyle
+        }
+
+        public static var badgeItalicsStyle: [NSAttributedString.Key: Any] {
+            FeatureFlag.milestoneNotifications.enabled ? badgeStyle(withFont: badgeItalicsFont) : blockItalicsStyle
+        }
+
+        public static var badgeQuotedStyle: [NSAttributedString.Key: Any] {
+            FeatureFlag.milestoneNotifications.enabled ? badgeStyle(withFont: badgeItalicsFont, color: badgeQuotedColor) : blockQuotedStyle
+        }
+
+        public static let badgeTitleStyle: [NSAttributedString.Key: Any] = badgeStyle(withFont: badgeTitleFont)
+        public static var badgeTitleBoldStyle: [NSAttributedString.Key: Any] = badgeStyle(withFont: badgeTitleBoldFont)
+        public static var badgeTitleItalicsStyle: [NSAttributedString.Key: Any] = badgeStyle(withFont: badgeTitleItalicsFont)
+        public static var badgeTitleQuotedStyle: [NSAttributedString.Key: Any] = badgeStyle(withFont: badgeTitleItalicsFont, color: badgeQuotedColor)
+
+        private static func badgeStyle(withFont font: UIFont, color: UIColor = badgeTextColor) -> [NSAttributedString.Key: Any] {
+            return [.paragraphStyle: badgeParagraph, .font: font, .foregroundColor: color ]
+        }
 
         // Blocks
         public static let contentBlockRegularFont   = WPFontManager.notoRegularFont(ofSize: blockFontSize)
@@ -256,8 +293,8 @@ extension WPStyleGuide {
             // Image(s)
             let side = WPStyleGuide.fontSizeForTextStyle(.subheadline)
             let size = CGSize(width: side, height: side)
-            let followIcon = Gridicon.iconOfType(.readerFollow, withSize: size)
-            let followingIcon = Gridicon.iconOfType(.readerFollowing, withSize: size)
+            let followIcon = UIImage.gridicon(.readerFollow, size: size)
+            let followingIcon = UIImage.gridicon(.readerFollowing, size: size)
 
             button.setImage(followIcon.imageWithTintColor(normalColor), for: .normal)
             button.setImage(followingIcon.imageWithTintColor(selectedColor), for: .selected)
@@ -307,15 +344,18 @@ extension WPStyleGuide {
         fileprivate static let snippetParagraph         = NSMutableParagraphStyle(
             minLineHeight: snippetLineSize, lineBreakMode: .byWordWrapping, alignment: .natural
         )
+        fileprivate static let snippetHeaderParagraph   = NSMutableParagraphStyle(
+            minLineHeight: snippetLineSize, lineBreakMode: .byTruncatingTail, alignment: .natural
+        )
         fileprivate static let blockParagraph           = NSMutableParagraphStyle(
             minLineHeight: blockLineSize, lineBreakMode: .byWordWrapping, alignment: .natural
         )
         fileprivate static let contentBlockParagraph     = NSMutableParagraphStyle(
             minLineHeight: contentBlockLineSize, lineBreakMode: .byWordWrapping, alignment: .natural
         )
-        fileprivate static let badgeParagraph           = NSMutableParagraphStyle(
-            minLineHeight: blockLineSize, maxLineHeight: blockLineSize, lineBreakMode: .byWordWrapping, alignment: .center
-        )
+        fileprivate static let badgeParagraph           = FeatureFlag.milestoneNotifications.enabled ?
+            NSMutableParagraphStyle(minLineHeight: blockLineSize, lineBreakMode: .byWordWrapping, alignment: .center) :
+            NSMutableParagraphStyle(minLineHeight: blockLineSize, maxLineHeight: blockLineSize, lineBreakMode: .byWordWrapping, alignment: .center)
 
         // Colors
         fileprivate static let sectionHeaderTextColor   = UIColor.textSubtle
@@ -333,8 +373,8 @@ extension WPStyleGuide {
         fileprivate static var subjectRegularFont: UIFont {
             return WPStyleGuide.fontForTextStyle(.subheadline)
         }
-        fileprivate static var subjectBoldFont: UIFont {
-            return WPStyleGuide.fontForTextStyle(.subheadline, fontWeight: .bold)
+        fileprivate static var subjectSemiBoldFont: UIFont {
+            return WPStyleGuide.fontForTextStyle(.subheadline, fontWeight: .semibold)
         }
         fileprivate static var subjectItalicsFont: UIFont {
             return  WPStyleGuide.fontForTextStyle(.subheadline, symbolicTraits: .traitItalic)

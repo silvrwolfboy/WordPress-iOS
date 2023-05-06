@@ -17,6 +17,23 @@ enum StatsPeriodType: Int, FilterTabBarItem, CaseIterable {
         case .years: return NSLocalizedString("Years", comment: "Title of Years stats filter.")
         }
     }
+
+    init?(from string: String) {
+        switch string {
+        case "day":
+            self = .days
+        case "week":
+            self = .weeks
+        case "month":
+            self = .months
+        case "year":
+            self = .years
+        case "insights":
+            self = .insights
+        default:
+            return nil
+        }
+    }
 }
 
 fileprivate extension StatsPeriodType {
@@ -35,22 +52,80 @@ fileprivate extension StatsPeriodType {
 
 class SiteStatsDashboardViewController: UIViewController {
 
+    // MARK: - Keys
+
+    static func lastSelectedStatsPeriodTypeKey(forSiteID siteID: Int) -> String {
+        return "LastSelectedStatsPeriodType-\(siteID)"
+    }
+
+    static let lastSelectedStatsDateKey = "LastSelectedStatsDate"
+
     // MARK: - Properties
 
     @IBOutlet weak var filterTabBar: FilterTabBar!
+    @IBOutlet weak var jetpackBannerView: JetpackBannerView!
 
     private var insightsTableViewController = SiteStatsInsightsTableViewController.loadFromStoryboard()
     private var periodTableViewController = SiteStatsPeriodTableViewController.loadFromStoryboard()
     private var pageViewController: UIPageViewController?
 
+    @objc lazy var manageInsightsButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+                image: .gridicon(.cog),
+                style: .plain,
+                target: self,
+                action: #selector(manageInsightsButtonTapped))
+        button.accessibilityHint = NSLocalizedString("Tap to customize insights", comment: "Accessibility hint to customize insights")
+        return button
+    }()
+
     // MARK: - View
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        configureJetpackBanner()
+        configureInsightsTableView()
+        configurePeriodTableViewController()
         setupFilterBar()
+        restoreSelectedDateFromUserDefaults()
         restoreSelectedPeriodFromUserDefaults()
         addWillEnterForegroundObserver()
+        configureNavBar()
         view.accessibilityIdentifier = "stats-dashboard"
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        JetpackFeaturesRemovalCoordinator.presentOverlayIfNeeded(in: self, source: .stats)
+    }
+
+    func configureInsightsTableView() {
+        insightsTableViewController.tableStyle = FeatureFlag.statsNewAppearance.enabled ? .insetGrouped : .grouped
+        insightsTableViewController.bannerView = jetpackBannerView
+    }
+
+    private func configurePeriodTableViewController() {
+        periodTableViewController.bannerView = jetpackBannerView
+    }
+
+    func configureNavBar() {
+        parent?.navigationItem.rightBarButtonItem = currentSelectedPeriod == .insights ? manageInsightsButton : nil
+    }
+
+    func configureJetpackBanner() {
+        guard JetpackBrandingVisibility.all.enabled else {
+            jetpackBannerView.removeFromSuperview()
+            return
+        }
+        let textProvider = JetpackBrandingTextProvider(screen: JetpackBannerScreen.stats)
+        jetpackBannerView.configure(title: textProvider.brandingText()) { [unowned self] in
+            JetpackBrandingCoordinator.presentOverlay(from: self)
+            JetpackBrandingAnalyticsHelper.trackJetpackPoweredBannerTapped(screen: .stats)
+        }
+    }
+
+    @objc func manageInsightsButtonTapped() {
+        insightsTableViewController.showAddInsightView(source: "nav_bar")
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -69,7 +144,7 @@ class SiteStatsDashboardViewController: UIViewController {
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         if traitCollection.verticalSizeClass == .regular, traitCollection.horizontalSizeClass == .compact {
-            updatePeriodView(oldSelectedPeriod: currentSelectedPeriod, withDate: periodTableViewController.selectedDate)
+            updatePeriodView(oldSelectedPeriod: currentSelectedPeriod)
         }
     }
 }
@@ -85,7 +160,6 @@ extension SiteStatsDashboardViewController: StatsForegroundObservable {
 private extension SiteStatsDashboardViewController {
 
     struct Constants {
-        static let userDefaultsKey = "LastSelectedStatsPeriodType"
         static let progressViewInitialProgress = Float(0.03)
         static let progressViewHideDelay = 1
         static let progressViewHideDuration = 0.15
@@ -119,6 +193,8 @@ private extension SiteStatsDashboardViewController {
 
     @objc func selectedFilterDidChange(_ filterBar: FilterTabBar) {
         currentSelectedPeriod = StatsPeriodType(rawValue: filterBar.selectedIndex) ?? StatsPeriodType.insights
+
+        configureNavBar()
     }
 
 }
@@ -128,25 +204,56 @@ private extension SiteStatsDashboardViewController {
 private extension SiteStatsDashboardViewController {
 
     func saveSelectedPeriodToUserDefaults() {
-        UserDefaults.standard.set(currentSelectedPeriod.rawValue, forKey: Constants.userDefaultsKey)
+        guard let siteID = SiteStatsInformation.sharedInstance.siteID?.intValue else {
+            return
+        }
+
+        let key = Self.lastSelectedStatsPeriodTypeKey(forSiteID: siteID)
+
+        guard !insightsTableViewController.isGrowAudienceShowing else {
+            UserPersistentStoreFactory.instance().set(StatsPeriodType.insights.rawValue, forKey: key)
+            return
+        }
+
+        UserPersistentStoreFactory.instance().set(currentSelectedPeriod.rawValue, forKey: key)
     }
 
     func getSelectedPeriodFromUserDefaults() -> StatsPeriodType {
-        return StatsPeriodType(rawValue: UserDefaults.standard.integer(forKey: Constants.userDefaultsKey)) ?? .insights
+
+        guard let siteID = SiteStatsInformation.sharedInstance.siteID?.intValue,
+              let periodType = StatsPeriodType(rawValue: UserPersistentStoreFactory.instance().integer(forKey: Self.lastSelectedStatsPeriodTypeKey(forSiteID: siteID))) else {
+            return .insights
+        }
+
+        return periodType
+    }
+
+    func getLastSelectedDateFromUserDefaults() -> Date? {
+        UserPersistentStoreFactory.instance().object(forKey: Self.lastSelectedStatsDateKey) as? Date
+    }
+
+    func removeLastSelectedDateFromUserDefaults() {
+        UserPersistentStoreFactory.instance().removeObject(forKey: Self.lastSelectedStatsDateKey)
+    }
+
+    func restoreSelectedDateFromUserDefaults() {
+        periodTableViewController.selectedDate = getLastSelectedDateFromUserDefaults()
+        removeLastSelectedDateFromUserDefaults()
     }
 
     func restoreSelectedPeriodFromUserDefaults() {
         currentSelectedPeriod = getSelectedPeriodFromUserDefaults()
     }
 
-    func updatePeriodView(oldSelectedPeriod: StatsPeriodType, withDate periodDate: Date? = nil) {
+    func updatePeriodView(oldSelectedPeriod: StatsPeriodType) {
         let selectedPeriodChanged = currentSelectedPeriod != oldSelectedPeriod
         let previousSelectedPeriodWasInsights = oldSelectedPeriod == .insights
         let pageViewControllerIsEmpty = pageViewController?.viewControllers?.isEmpty ?? true
+        let isGrowAudienceShowingOnInsights = insightsTableViewController.isGrowAudienceShowing
 
         switch currentSelectedPeriod {
         case .insights:
-            if selectedPeriodChanged || pageViewControllerIsEmpty {
+            if selectedPeriodChanged || pageViewControllerIsEmpty || isGrowAudienceShowingOnInsights {
                 pageViewController?.setViewControllers([insightsTableViewController],
                                                        direction: .forward,
                                                        animated: false)
@@ -159,7 +266,12 @@ private extension SiteStatsDashboardViewController {
                                                        animated: false)
             }
 
-            periodTableViewController.selectedDate = periodDate ?? StatsDataHelper.currentDateForSite()
+            if periodTableViewController.selectedDate == nil
+                || selectedPeriodChanged {
+
+                periodTableViewController.selectedDate = StatsDataHelper.currentDateForSite()
+            }
+
             let selectedPeriod = StatsPeriodUnit(rawValue: currentSelectedPeriod.rawValue - 1) ?? .day
             periodTableViewController.selectedPeriod = selectedPeriod
         }

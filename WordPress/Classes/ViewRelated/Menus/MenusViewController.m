@@ -9,7 +9,7 @@
 #import "MenuItemsViewController.h"
 #import "MenuItemEditingViewController.h"
 #import "Menu+ViewDesign.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "WPAppAnalytics.h"
 #import "WordPress-Swift.h"
 #import <WordPressShared/WPFontManager.h>
@@ -38,6 +38,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
 
 @property (nonatomic, strong) MenuLocation *selectedMenuLocation;
 @property (nonatomic, strong) Menu *updatedMenuForSaving;
+@property (nonatomic, strong) Menu *initialMenuSelection;
 
 @property (nonatomic, assign) BOOL observesKeyboardChanges;
 @property (nonatomic, assign) BOOL animatesAppearanceAfterSync;
@@ -83,9 +84,12 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
     self.navigationItem.title = NSLocalizedString(@"Menus", @"Title for screen that allows configuration of your site's menus");
     self.view.backgroundColor = [UIColor murielListBackground];
 
+    self.extendedLayoutIncludesOpaqueBars = YES;
+
     self.scrollView.backgroundColor = self.view.backgroundColor;
     self.scrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
     self.scrollView.alpha = 0.0;
+    self.scrollView.delegate = self;
 
     // add a bit of padding to the scrollable content
     self.stackView.layoutMargins = UIEdgeInsetsMake(0, 0, 10, 0);
@@ -221,7 +225,8 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
          */
         [self setNeedsSave:YES forMenu:self.selectedMenuLocation.menu significantChanges:NO];
     } else {
-        [self setNeedsSave:YES forMenu:menu significantChanges:NO];
+        BOOL needsSave = (menu != self.initialMenuSelection) || self.hasMadeSignificantMenuChanges;
+        [self setNeedsSave:needsSave forMenu:menu significantChanges:NO];
     }
     self.selectedMenuLocation.menu = menu;
     [self.headerViewController setSelectedMenu:menu];
@@ -238,7 +243,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
                                 success:^{
                                     [self didSyncBlog];
                                 }
-                                failure:^(NSError *error) {
+                                failure:^(NSError * __unused error) {
                                     DDLogDebug(@"MenusViewController could not sync menus for blog");
                                     [self showNoResultsWithTitle:[self noResultsErrorTitle]];
                                 }];
@@ -256,13 +261,14 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
     self.headerViewController.blog = self.blog;
     MenuLocation *selectedLocation = [self.blog.menuLocations firstObject];
     self.selectedMenuLocation = selectedLocation;
+    self.initialMenuSelection = selectedLocation.menu;
 
     if (!self.animatesAppearanceAfterSync) {
         self.scrollView.alpha = 1.0;
     } else {
         [UIView animateWithDuration:0.20 animations:^{
             self.scrollView.alpha = 1.0;
-        } completion:^(BOOL finished) {
+        } completion:^(BOOL __unused finished) {
         }];
     }
 }
@@ -347,7 +353,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
                 }
             }
         };
-        void(^failureBlock)(NSError *) = ^(NSError *error) {
+        void(^failureBlock)(NSError *) = ^(NSError * __unused error) {
             weakSelf.itemsLoadingLabel.text = NSLocalizedString(@"An error occurred loading the menu, please check your internet connection.", @"Menus error message seen when an error occurred loading a specific menu.");
         };
         [self.menusService generateDefaultMenuItemsForBlog:self.blog
@@ -529,6 +535,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
     }
 
     [self.noResultsViewController configureWithTitle:title
+                                     attributedTitle:nil
                                    noConnectionTitle:nil
                                          buttonTitle:nil
                                             subtitle:nil
@@ -642,9 +649,11 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
         [self promptForDiscardingChangesBeforeSelectingADifferentLocation:^{
             [self discardAllChanges];
             self.selectedMenuLocation = location;
+            self.initialMenuSelection = location.menu;
         } cancellation:nil];
     } else {
         self.selectedMenuLocation = location;
+        self.initialMenuSelection = location.menu;
     }
 }
 
@@ -702,7 +711,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
     NSString *cancelTitle = NSLocalizedString(@"Cancel", @"Menus cancel button for deleting a menu.");
     UIAlertAction *confirmAction = [UIAlertAction actionWithTitle:confirmTitle
                                                             style:UIAlertActionStyleDestructive
-                                                          handler:^(UIAlertAction * _Nonnull action) {
+                                                          handler:^(UIAlertAction * _Nonnull __unused action) {
                                                               [weakSelf deleteMenu:menuToDelete];
                                                           }];
     [alertController addAction:confirmAction];
@@ -802,7 +811,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
 
     NSString *confirmationTitle = NSLocalizedString(@"Discard and Select Location", @"Menus alert button title to continue selecting a menu location and discarding current changes.");
     [alert addDestructiveActionWithTitle:confirmationTitle
-                                 handler:^(UIAlertAction * _Nonnull action) {
+                                 handler:^(UIAlertAction * _Nonnull __unused action) {
                                      if (confirmationBlock) {
                                          confirmationBlock();
                                      }
@@ -810,7 +819,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
 
     NSString *cancelTitle = NSLocalizedString(@"Cancel and Keep Changes", @"Menus alert button title to cancel discarding changes and not select a new menu location");
     [alert addCancelActionWithTitle:cancelTitle
-                            handler:^(UIAlertAction * _Nonnull action) {
+                            handler:^(UIAlertAction * _Nonnull __unused action) {
                                 if (cancellationBlock) {
                                     cancellationBlock();
                                 }
@@ -828,7 +837,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
 
     NSString *confirmationTitle = NSLocalizedString(@"Discard and Select Menu", @"Menus alert button title to continue selecting a menu and discarding current changes.");
     [alert addDestructiveActionWithTitle:confirmationTitle
-                                 handler:^(UIAlertAction * _Nonnull action) {
+                                 handler:^(UIAlertAction * _Nonnull __unused action) {
                                      if (confirmationBlock) {
                                          confirmationBlock();
                                      }
@@ -836,7 +845,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
 
     NSString *cancelTitle = NSLocalizedString(@"Cancel and Keep Changes", @"Menus alert button title to cancel discarding changes and not select a new menu");
     [alert addCancelActionWithTitle:cancelTitle
-                            handler:^(UIAlertAction * _Nonnull action) {
+                            handler:^(UIAlertAction * _Nonnull __unused action) {
                                 if (cancellationBlock) {
                                     cancellationBlock();
                                 }
@@ -854,7 +863,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
 
     NSString *confirmationTitle = NSLocalizedString(@"Discard and Create New Menu", @"Menus alert button title to continue creating a menu and discarding current changes.");
     [alert addDestructiveActionWithTitle:confirmationTitle
-                                 handler:^(UIAlertAction * _Nonnull action) {
+                                 handler:^(UIAlertAction * _Nonnull __unused action) {
                                      if (confirmationBlock) {
                                          confirmationBlock();
                                      }
@@ -862,7 +871,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
 
     NSString *cancelTitle = NSLocalizedString(@"Cancel and Keep Changes", @"Menus alert button title to cancel discarding changes and not createa a new menu.");
     [alert addCancelActionWithTitle:cancelTitle
-                            handler:^(UIAlertAction * _Nonnull action) {
+                            handler:^(UIAlertAction * _Nonnull __unused action) {
                                 if (cancellationBlock) {
                                     cancellationBlock();
                                 }
@@ -880,7 +889,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
 
     NSString *confirmationTitle = NSLocalizedString(@"Discard Changes", @"Menus alert button title to discard changes.");
     [alert addDestructiveActionWithTitle:confirmationTitle
-                                 handler:^(UIAlertAction * _Nonnull action) {
+                                 handler:^(UIAlertAction * _Nonnull __unused action) {
                                      if (confirmationBlock) {
                                          confirmationBlock();
                                      }
@@ -888,7 +897,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
 
     NSString *cancelTitle = NSLocalizedString(@"Continue Working", @"Menus alert button title to continue making changes.");
     [alert addCancelActionWithTitle:cancelTitle
-                            handler:^(UIAlertAction * _Nonnull action) {
+                            handler:^(UIAlertAction * _Nonnull __unused action) {
                                 if (cancellationBlock) {
                                     cancellationBlock();
                                 }
@@ -905,7 +914,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
     frame = [self.view.window convertRect:frame toView:self.view];
 
     UIEdgeInsets inset = self.scrollView.contentInset;
-    UIEdgeInsets scrollInset = self.scrollView.scrollIndicatorInsets;
+    UIEdgeInsets scrollInset = self.scrollView.verticalScrollIndicatorInsets;
 
     if (frame.origin.y > self.view.frame.size.height) {
         inset.bottom = 0.0;
@@ -924,7 +933,7 @@ static CGFloat const ScrollViewOffsetAdjustmentPadding = 10.0;
     self.observesKeyboardChanges = NO;
 
     UIEdgeInsets inset = self.scrollView.contentInset;
-    UIEdgeInsets scrollInset = self.scrollView.scrollIndicatorInsets;
+    UIEdgeInsets scrollInset = self.scrollView.verticalScrollIndicatorInsets;
     inset.bottom = 0;
     scrollInset.bottom = 0;
     self.scrollView.contentInset = inset;

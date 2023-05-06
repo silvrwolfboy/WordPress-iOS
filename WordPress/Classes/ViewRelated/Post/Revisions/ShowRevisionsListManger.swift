@@ -1,4 +1,4 @@
-protocol RevisionsView: class {
+protocol RevisionsView: AnyObject {
     func stopLoading(success: Bool, error: Error?)
 }
 
@@ -29,7 +29,7 @@ final class ShowRevisionsListManger {
 
         isLoading = true
 
-        postService.getPostRevisions(for: post, success: { [weak self] _ in
+        postService.getPostRevisions(for: post, success: { [weak self] in
             DispatchQueue.main.async {
                 self?.isLoading = false
                 self?.revisionsView?.stopLoading(success: true, error: nil)

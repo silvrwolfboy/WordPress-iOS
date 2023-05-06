@@ -10,17 +10,7 @@ extension ReaderStreamViewController {
         var message: String
     }
 
-    func checkNewsCardAvailability(topic: ReaderAbstractTopic) {
-        let containerIdentifier = Identifier(value: topic.title)
-        let mustBadge = news.shouldPresentCard(containerIdentifier: containerIdentifier)
-        let notificationName: NSNotification.Name = mustBadge ? .NewsCardAvailable : .NewsCardNotAvailable
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01, execute: {
-            NotificationCenter.default.post(name: notificationName, object: nil)
-        })
-    }
-
-    /// Returns the ReaderStreamHeader appropriate for a particular ReaderTopic, including News Card, or nil if there is not one.
+    /// Returns the ReaderStreamHeader appropriate for a particular ReaderTopic.
     /// The header is returned already configured
     ///
     /// - Parameter topic: A ReaderTopic
@@ -29,13 +19,11 @@ extension ReaderStreamViewController {
     ///
     /// - Returns: A configured instance of UIView.
     ///
-    func headerWithNewsCardForStream(_ topic: ReaderAbstractTopic, isLoggedIn: Bool, container: UITableViewController) -> UIView? {
+    func headerForStream(_ topic: ReaderAbstractTopic, isLoggedIn: Bool, container: UITableViewController) -> UIView? {
 
         let header = headerForStream(topic)
         configure(header, topic: topic, isLoggedIn: isLoggedIn, delegate: self)
-        let containerIdentifier = Identifier(value: topic.title)
-
-        return news.newsCard(containerIdentifier: containerIdentifier, header: header, container: container, delegate: self)
+        return header
     }
 
     func configure(_ header: ReaderHeader?, topic: ReaderAbstractTopic, isLoggedIn: Bool, delegate: ReaderStreamHeaderDelegate) {
@@ -45,33 +33,25 @@ extension ReaderStreamViewController {
     }
 
     func headerForStream(_ topic: ReaderAbstractTopic) -> ReaderHeader? {
-        if ReaderHelpers.topicIsFreshlyPressed(topic) || ReaderHelpers.topicIsLiked(topic) {
-            // no header for these special lists
-            return nil
+
+        if ReaderHelpers.isTopicTag(topic) && !isContentFiltered {
+            return Bundle.main.loadNibNamed("ReaderTagStreamHeader", owner: nil, options: nil)?.first as? ReaderTagStreamHeader
         }
 
-        if ReaderHelpers.topicIsFollowing(topic) {
-            return Bundle.main.loadNibNamed("ReaderFollowedSitesStreamHeader", owner: nil, options: nil)!.first as! ReaderFollowedSitesStreamHeader
-        }
-
-        // if tag
-        if ReaderHelpers.isTopicTag(topic) {
-            return Bundle.main.loadNibNamed("ReaderTagStreamHeader", owner: nil, options: nil)!.first as! ReaderTagStreamHeader
-        }
-
-        // if list
         if ReaderHelpers.isTopicList(topic) {
-            return Bundle.main.loadNibNamed("ReaderListStreamHeader", owner: nil, options: nil)!.first as! ReaderListStreamHeader
+            return Bundle.main.loadNibNamed("ReaderListStreamHeader", owner: nil, options: nil)?.first as? ReaderListStreamHeader
         }
 
-        // if site
-        if ReaderHelpers.isTopicSite(topic) {
-            return Bundle.main.loadNibNamed("ReaderSiteStreamHeader", owner: nil, options: nil)!.first as! ReaderSiteStreamHeader
+        if ReaderHelpers.isTopicSite(topic) && !isContentFiltered {
+            return Bundle.main.loadNibNamed("ReaderSiteStreamHeader", owner: nil, options: nil)?.first as? ReaderSiteStreamHeader
         }
 
-        // if anything else return nil
         return nil
     }
+
+    static let defaultResponse = NoResultsResponse(
+        title: NSLocalizedString("No recent posts", comment: "A message title"),
+        message: NSLocalizedString("No posts have been made recently", comment: "A default message shown when the reader can find no post to display"))
 
     /// Returns a NoResultsResponse instance appropriate for the specified ReaderTopic
     ///
@@ -130,10 +110,64 @@ extension ReaderStreamViewController {
         }
 
         // Default message
-        return NoResultsResponse(
-            title: NSLocalizedString("No recent posts", comment: "A message title"),
-            message: NSLocalizedString("No posts have been made recently", comment: "A default message shown whe the reader can find no post to display")
-        )
+        return defaultResponse
+    }
+}
+
+
+// MARK: - No Results for saved posts
+extension ReaderStreamViewController {
+
+    func configureNoResultsViewForSavedPosts() {
+
+        let noResultsResponse = NoResultsResponse(title: NSLocalizedString("No saved posts",
+                                                                           comment: "Message displayed in Reader Saved Posts view if a user hasn't yet saved any posts."),
+                                                  message: NSLocalizedString("Tap [bookmark-outline] to save a post to your list.",
+                                                                             comment: "A hint displayed in the Saved Posts section of the Reader. The '[bookmark-outline]' placeholder will be replaced by an icon at runtime – please leave that string intact."))
+
+        var messageText = NSMutableAttributedString(string: noResultsResponse.message)
+
+        // Get attributed string styled for No Results so it gets the correct font attributes added to it.
+        // The font is used by the attributed string `replace(_:with:)` method below to correctly position the icon.
+        let styledText = resultsStatusView.applyMessageStyleTo(attributedString: messageText)
+        messageText = NSMutableAttributedString(attributedString: styledText)
+
+        let icon = UIImage.gridicon(.bookmarkOutline, size: CGSize(width: 18, height: 18))
+        messageText.replace("[bookmark-outline]", with: icon)
+
+        resultsStatusView.configureForLocalData(title: noResultsResponse.title, attributedSubtitle: messageText, image: "wp-illustration-reader-empty")
+    }
+}
+
+
+// MARK: - Undo cell for saved posts
+extension ReaderStreamViewController {
+
+    private enum UndoCell {
+        static let nibName = "ReaderSavedPostUndoCell"
+        static let reuseIdentifier = "ReaderUndoCellReuseIdentifier"
+        static let height: CGFloat = 44
     }
 
+    func setupUndoCell(_ tableView: UITableView) {
+        let nib = UINib(nibName: UndoCell.nibName, bundle: nil)
+        tableView.register(nib, forCellReuseIdentifier: UndoCell.reuseIdentifier)
+    }
+
+    func undoCell(_ tableView: UITableView) -> ReaderSavedPostUndoCell {
+        return tableView.dequeueReusableCell(withIdentifier: UndoCell.reuseIdentifier) as! ReaderSavedPostUndoCell
+    }
+
+    func configureUndoCell(_ cell: ReaderSavedPostUndoCell, with post: ReaderPost) {
+        cell.title.text = post.titleForDisplay()
+        cell.delegate = self
+    }
+}
+
+
+// MARK: - Tracks
+extension ReaderStreamViewController {
+    func trackSavedListAccessed() {
+        WPAnalytics.trackReader(.readerSavedListShown, properties: ["source": ReaderSaveForLaterOrigin.readerMenu.viewAllPostsValue])
+    }
 }

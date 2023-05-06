@@ -3,7 +3,6 @@
 #import "Blog.h"
 #import "PostCategory.h"
 #import "PostCategoryService.h"
-#import "TestContextManager.h"
 #import "WordPressTest-Swift.h"
 @import WordPressKit;
 
@@ -28,7 +27,7 @@
 
 @interface PostCategoryServiceTests : XCTestCase
 
-@property (nonatomic, strong) TestContextManager *manager;
+@property (nonatomic, strong) id<CoreDataStack> manager;
 @property (nonatomic, strong) Blog *blog;
 @property (nonatomic, strong) PostCategoryServiceForStubbing *service;
 
@@ -40,7 +39,7 @@
 {
     [super setUp];
 
-    self.manager = [TestContextManager new];
+    self.manager = [self coreDataStackForTesting];
     WordPressComRestApi *api = OCMStrictClassMock([WordPressComRestApi class]);
 
     Blog *blog = [ModelTestHelper insertDotComBlogWithContext:self.manager.mainContext];
@@ -48,7 +47,7 @@
     blog.dotComID = @1;
     self.blog = blog;
 
-    PostCategoryServiceForStubbing *service = [[PostCategoryServiceForStubbing alloc] initWithManagedObjectContext:self.manager.mainContext];
+    PostCategoryServiceForStubbing *service = [[PostCategoryServiceForStubbing alloc] initWithCoreDataStack:self.manager];
     
     TaxonomyServiceRemoteREST *remoteService = OCMStrictClassMock([TaxonomyServiceRemoteREST class]);
     service.remoteForStubbing = remoteService;
@@ -74,7 +73,7 @@
     
     [self.service syncCategoriesForBlog:self.blog
                                 success:^{}
-                                failure:^(NSError * _Nonnull error) {}];
+                                failure:^(NSError * _Nonnull __unused error) {}];
 }
 
 - (void)testThatSyncCategoriesWithPagingWorks
@@ -100,8 +99,8 @@
     [self.service syncCategoriesForBlog:self.blog
                                  number:number
                                  offset:offset
-                                success:^(NSArray<PostCategory *> * _Nonnull tags) {}
-                                failure:^(NSError * _Nonnull error) {}];
+                                success:^(NSArray<PostCategory *> * _Nonnull __unused tags) {}
+                                failure:^(NSError * _Nonnull __unused error) {}];
 }
 
 - (void)testThatCreateCategoryWithNameWorks
@@ -123,8 +122,34 @@
     [self.service createCategoryWithName:name
                   parentCategoryObjectID:nil
                          forBlogObjectID:self.blog.objectID
-                                 success:^(PostCategory * _Nonnull category) {}
-                                 failure:^(NSError * _Nonnull error) {}];
+                                 success:^(PostCategory * _Nonnull __unused category) {}
+                                 failure:^(NSError * _Nonnull __unused error) {}];
+}
+
+- (void)testSyncSuccessShouldBeCalledOnce
+{
+    TaxonomyServiceRemoteREST *remote = self.service.remoteForStubbing;
+
+    XCTestExpectation *completion = [self expectationWithDescription:@"Only the success block is called"];
+    OCMStub([remote getCategoriesWithSuccess:[OCMArg invokeBlock]
+                                     failure:[OCMArg isNotNil]]);
+    [self.service syncCategoriesForBlog:self.blog
+                                success:^{ [completion fulfill]; }
+                                failure:^(NSError * _Nonnull __unused error) {[completion fulfill]; }];
+    [self waitForExpectations:@[completion] timeout:1];
+}
+
+- (void)testSyncFailureShouldBeCalledOnce
+{
+    TaxonomyServiceRemoteREST *remote = self.service.remoteForStubbing;
+
+    XCTestExpectation *completion = [self expectationWithDescription:@"Only the failure block is called"];
+    OCMStub([remote getCategoriesWithSuccess:[OCMArg isNotNil]
+                                     failure:[OCMArg invokeBlock]]);
+    [self.service syncCategoriesForBlog:self.blog
+                                success:^{ [completion fulfill]; }
+                                failure:^(NSError * _Nonnull __unused error) {[completion fulfill]; }];
+    [self waitForExpectations:@[completion] timeout:1];
 }
 
 @end

@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import SwiftUI
 import Gridicons
 import WordPressShared
 import SVProgressHUD
@@ -25,13 +26,14 @@ class AppSettingsViewController: UITableViewController {
     }
 
     required convenience init() {
-        self.init(style: .grouped)
+        self.init(style: .insetGrouped)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
         ImmuTable.registerRows([
+            BrandedNavigationRow.self,
             DestructiveButtonRow.self,
             TextRow.self,
             ImageSizingRow.self,
@@ -132,15 +134,6 @@ class AppSettingsViewController: UITableViewController {
         }
     }
 
-    fileprivate func clearMediaCache() {
-        setMediaCacheRowDescription(status: .clearingCache)
-        MediaFileManager.clearAllMediaCacheFiles(onCompletion: { [weak self] in
-            self?.updateMediaCacheSize()
-            }, onError: { [weak self] (error) in
-                self?.updateMediaCacheSize()
-        })
-    }
-
     // MARK: - Actions
 
     @objc func imageSizeChanged() -> (Int) -> Void {
@@ -148,11 +141,18 @@ class AppSettingsViewController: UITableViewController {
             MediaSettings().maxImageSizeSetting = value
             ShareExtensionService.configureShareExtensionMaximumMediaDimension(value)
 
-            var properties = [String: AnyObject]()
-            properties["enabled"] = (value != Int.max) as AnyObject
-            properties["value"] = value as Int as AnyObject
-            WPAnalytics.track(.appSettingsImageOptimizationChanged, withProperties: properties)
+            self.debounce(#selector(self.trackImageSizeChanged), afterDelay: 0.5)
         }
+    }
+
+    @objc func trackImageSizeChanged() {
+        let value = MediaSettings().maxImageSizeSetting
+
+        var properties = [String: AnyObject]()
+        properties["enabled"] = (value != Int.max) as AnyObject
+        properties["value"] = value as Int as AnyObject
+
+        WPAnalytics.track(.appSettingsImageOptimizationChanged, withProperties: properties)
     }
 
     func pushVideoResolutionSettings() -> ImmuTableAction {
@@ -190,6 +190,13 @@ class AppSettingsViewController: UITableViewController {
         }
     }
 
+    func openMediaCacheSettings() -> ImmuTableAction {
+        return { [weak self] _ in
+            let controller = MediaCacheSettingsViewController(style: .insetGrouped)
+            self?.navigationController?.pushViewController(controller, animated: true)
+        }
+    }
+
     @objc func mediaRemoveLocationChanged() -> (Bool) -> Void {
         return { value in
             MediaSettings().removeLocationSetting = value
@@ -197,9 +204,56 @@ class AppSettingsViewController: UITableViewController {
         }
     }
 
+    func pushAppearanceSettings() -> ImmuTableAction {
+        return { [weak self] row in
+            let values = UIUserInterfaceStyle.allStyles
+
+            let rawValues = values.map({ $0.rawValue })
+            let titles = values.map({ $0.appearanceDescription })
+
+            let currentStyle = AppAppearance.current
+
+            let settingsSelectionConfiguration = [SettingsSelectionDefaultValueKey: AppAppearance.default.rawValue,
+                                                  SettingsSelectionCurrentValueKey: currentStyle.rawValue,
+                                                  SettingsSelectionTitleKey: NSLocalizedString("Appearance", comment: "The title of the app appearance settings screen"),
+                                                  SettingsSelectionTitlesKey: titles,
+                                                  SettingsSelectionValuesKey: rawValues] as [String: Any]
+
+            let viewController = SettingsSelectionViewController(dictionary: settingsSelectionConfiguration)
+
+            viewController?.onItemSelected = { [weak self] (style: Any!) -> () in
+                guard let style = style as? Int,
+                    let newStyle = UIUserInterfaceStyle(rawValue: style) else {
+                        return
+                }
+
+                self?.overrideAppAppearance(with: newStyle)
+            }
+
+            self?.navigationController?.pushViewController(viewController!, animated: true)
+        }
+    }
+
+    private func overrideAppAppearance(with style: UIUserInterfaceStyle) {
+        let transitionView: UIView = WordPressAppDelegate.shared?.window ?? view
+        UIView.transition(with: transitionView,
+                          duration: 0.3,
+                          options: .transitionCrossDissolve,
+                          animations: {
+                            AppAppearance.overrideAppearance(with: style)
+        })
+    }
+
     func pushDebugMenu() -> ImmuTableAction {
         return { [weak self] row in
-            let controller = DebugMenuViewController()
+            let controller = DebugMenuViewController(style: .insetGrouped)
+            self?.navigationController?.pushViewController(controller, animated: true)
+        }
+    }
+
+    func pushDesignSystemGallery() -> ImmuTableAction {
+        return { [weak self] row in
+            let controller = UIHostingController(rootView: ColorGallery())
             self?.navigationController?.pushViewController(controller, animated: true)
         }
     }
@@ -211,22 +265,19 @@ class AppSettingsViewController: UITableViewController {
         }
     }
 
-    func pushAbout() -> ImmuTableAction {
-        return { [weak self] row in
-            let controller = AboutViewController()
-            self?.navigationController?.pushViewController(controller, animated: true)
-        }
-    }
-
     func openPrivacySettings() -> ImmuTableAction {
         return { [weak self] _ in
-            let controller = PrivacySettingsViewController()
+            WPAnalytics.track(.privacySettingsOpened)
+
+            let controller = PrivacySettingsViewController(style: .insetGrouped)
             self?.navigationController?.pushViewController(controller, animated: true)
         }
     }
 
     func openApplicationSettings() -> ImmuTableAction {
         return { [weak self] row in
+            WPAnalytics.track(.appSettingsOpenDeviceSettingsTapped)
+
             if let targetURL = URL(string: UIApplication.openSettingsURLString) {
                 UIApplication.shared.open(targetURL)
 
@@ -240,24 +291,69 @@ class AppSettingsViewController: UITableViewController {
 
     func clearSiriActivityDonations() -> ImmuTableAction {
         return { [tableView] _ in
+            WPAnalytics.track(.appSettingsClearSiriSuggestionsTapped)
+
             tableView?.deselectSelectedRowWithAnimation(true)
 
-            if #available(iOS 12.0, *) {
-                NSUserActivity.deleteAllSavedUserActivities {}
-            }
+            NSUserActivity.deleteAllSavedUserActivities {}
 
-            let notice = Notice(title: NSLocalizedString("Siri Reset Confirmation", comment: "Notice displayed to the user after clearing the Siri activity donations."), feedbackType: .success)
+            let notice = Notice(title: NSLocalizedString("Siri Reset Confirmation", value: "Successfully cleared Siri Shortcut Suggestions", comment: "Notice displayed to the user after clearing the Siri activity donations."), feedbackType: .success)
             ActionDispatcher.dispatch(NoticeAction.post(notice))
         }
     }
 
     func clearSpotlightCache() -> ImmuTableAction {
         return { [weak self] row in
+            WPAnalytics.track(.appSettingsClearSpotlightIndexTapped)
+
             self?.tableView.deselectSelectedRowWithAnimation(true)
             SearchManager.shared.deleteAllSearchableItems()
             let notice = Notice(title: NSLocalizedString("Successfully cleared spotlight index", comment: "Notice displayed to the user after clearing the spotlight index in app settings."),
                                 feedbackType: .success)
             ActionDispatcher.dispatch(NoticeAction.post(notice))
+        }
+    }
+
+    func presentWhatIsNew() -> ImmuTableAction {
+        return { [weak self] row in
+            guard let self = self else {
+                return
+            }
+            self.tableView.deselectSelectedRowWithAnimation(true)
+            RootViewCoordinator.shared.presentWhatIsNew(on: self)
+        }
+    }
+
+    func pushInitialScreenSettings() -> ImmuTableAction {
+        return { [weak self] row in
+            let values = MySiteViewController.Section.allCases
+
+            let rawValues = values.map({ $0.rawValue })
+            let titles = values.map({ $0.title })
+
+            let currentStyle = MySiteSettings().defaultSection
+
+            let settingsSelectionConfiguration = [SettingsSelectionDefaultValueKey: AppAppearance.default.rawValue,
+                                                  SettingsSelectionCurrentValueKey: currentStyle.rawValue,
+                                                  SettingsSelectionTitleKey: NSLocalizedString("Initial Screen", comment: "The title of the app initial screen settings screen"),
+                                                  SettingsSelectionTitlesKey: titles,
+                                                  SettingsSelectionValuesKey: rawValues] as [String: Any]
+
+            let viewController = SettingsSelectionViewController(dictionary: settingsSelectionConfiguration)
+
+            viewController?.onItemSelected = { (section: Any!) -> () in
+                let oldDefaultSection = MySiteSettings().defaultSection
+                guard let section = section as? Int,
+                      let newDefaultSection = MySiteViewController.Section(rawValue: section),
+                      newDefaultSection != oldDefaultSection else {
+                        return
+                }
+
+                WPAnalytics.track(.initialScreenChanged, properties: ["selected": newDefaultSection.analyticsDescription])
+                MySiteSettings().setDefaultSection(newDefaultSection)
+            }
+
+            self?.navigationController?.pushViewController(viewController!, animated: true)
         }
     }
 }
@@ -329,23 +425,17 @@ private extension AppSettingsViewController {
             detail: MediaSettings().maxVideoSizeSetting.description,
             action: pushVideoResolutionSettings())
 
-        let mediaCacheRow = TextRow(title: NSLocalizedString("Media Cache Size", comment: "Label for size of media cache in the app."),
-                                    value: mediaCacheRowDescription)
-
-        let mediaClearCacheRow = DestructiveButtonRow(
-            title: NSLocalizedString("Clear Device Media Cache", comment: "Label for button that clears all media cache."),
-            action: { [weak self] row in
-                self?.clearMediaCache()
-            },
-            accessibilityIdentifier: "mediaClearCacheButton")
+        let mediaCacheRow = NavigationItemRow(
+            title: NSLocalizedString("Media Cache", comment: "Label for the media cache navigation row in the app."),
+            detail: mediaCacheRowDescription,
+            action: openMediaCacheSettings())
 
         return ImmuTableSection(
             headerText: mediaHeader,
             rows: [
                 imageSizingRow,
                 videoSizingRow,
-                mediaCacheRow,
-                mediaClearCacheRow
+                mediaCacheRow
             ],
             footerText: NSLocalizedString("Free up storage space on this device by deleting temporary media files. This will not affect the media on your site.",
                                           comment: "Explanatory text for clearing device media cache.")
@@ -366,7 +456,7 @@ private extension AppSettingsViewController {
             action: openPrivacySettings()
         )
 
-        let spotlightClearCacheRow = DestructiveButtonRow(
+        let spotlightClearCacheRow = BrandedNavigationRow(
             title: NSLocalizedString("Clear Spotlight Index", comment: "Label for button that clears the spotlight index on device."),
             action: clearSpotlightCache(),
             accessibilityIdentifier: "spotlightClearCacheButton")
@@ -376,14 +466,12 @@ private extension AppSettingsViewController {
             spotlightClearCacheRow
         ]
 
-        if #available(iOS 12.0, *) {
-            let siriClearCacheRow = DestructiveButtonRow(
-                title: NSLocalizedString("Siri Reset Prompt", comment: "Label for button that clears user activities donated to Siri."),
-                action: clearSiriActivityDonations(),
-                accessibilityIdentifier: "spotlightClearCacheButton")
+        let siriClearCacheRow = BrandedNavigationRow(
+            title: NSLocalizedString("Siri Reset Prompt", value: "Clear Siri Shortcut Suggestions", comment: "Label for button that clears user activities donated to Siri."),
+            action: clearSiriActivityDonations(),
+            accessibilityIdentifier: "spotlightClearCacheButton")
 
-            tableRows.append(siriClearCacheRow)
-        }
+        tableRows.append(siriClearCacheRow)
 
         tableRows.append(mediaRemoveLocation)
         let removeLocationFooterText = NSLocalizedString("Removes location metadata from photos before uploading them to your site.", comment: "Explanatory text for removing the location from uploaded media.")
@@ -400,8 +488,13 @@ private extension AppSettingsViewController {
 
         let debugRow = NavigationItemRow(
             title: NSLocalizedString("Debug", comment: "Navigates to debug menu only available in development builds"),
-            icon: Gridicon.iconOfType(.bug),
+            icon: .gridicon(.bug),
             action: pushDebugMenu()
+        )
+
+        let designSystem = NavigationItemRow(
+            title: NSLocalizedString("Design System", comment: "Navigates to design system gallery only available in development builds"),
+            action: pushDesignSystemGallery()
         )
 
         let iconRow = NavigationItemRow(
@@ -414,24 +507,61 @@ private extension AppSettingsViewController {
             action: openApplicationSettings()
         )
 
-        let aboutRow = NavigationItemRow(
-            title: NSLocalizedString("About WordPress for iOS", comment: "Link to About screen for WordPress for iOS"),
-            action: pushAbout()
-        )
+        var rows: [ImmuTableRow] = [settingsRow]
 
-        var rows = [settingsRow, aboutRow]
-        if #available(iOS 10.3, *),
-            UIApplication.shared.supportsAlternateIcons {
-                rows.insert(iconRow, at: 0)
+        if AppConfiguration.allowsCustomAppIcons && UIApplication.shared.supportsAlternateIcons {
+            // We don't show custom icons for Jetpack
+            rows.insert(iconRow, at: 0)
+        }
+
+        if JetpackFeaturesRemovalCoordinator.jetpackFeaturesEnabled() {
+            let initialScreen = NavigationItemRow(title: NSLocalizedString("Initial Screen", comment: "Title of the option to change the default initial screen"), detail: MySiteSettings().defaultSection.title, action: pushInitialScreenSettings())
+
+            rows.append(initialScreen)
         }
 
         if FeatureFlag.debugMenu.enabled {
             rows.append(debugRow)
+            rows.append(designSystem)
         }
+
+        if let presenter = RootViewCoordinator.shared.whatIsNewScenePresenter as? WhatIsNewScenePresenter,
+            presenter.versionHasAnnouncements,
+            AppConfiguration.showsWhatIsNew {
+            let whatIsNewRow = NavigationItemRow(title: AppConstants.Settings.whatIsNewTitle,
+                                                 action: presentWhatIsNew())
+            rows.append(whatIsNewRow)
+        }
+
+        let appearanceRow = NavigationItemRow(title: NSLocalizedString("Appearance", comment: "The title of the app appearance settings screen"), detail: AppAppearance.current.appearanceDescription, action: pushAppearanceSettings())
+
+        rows.insert(appearanceRow, at: 0)
 
         return ImmuTableSection(
             headerText: otherHeader,
             rows: rows,
             footerText: nil)
+    }
+}
+
+// MARK: - Jetpack powered badge
+extension AppSettingsViewController {
+
+    override func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
+        guard section == handler.viewModel.sections.count - 1,
+              JetpackBrandingVisibility.all.enabled else {
+            return nil
+        }
+        let textProvider = JetpackBrandingTextProvider(screen: JetpackBadgeScreen.appSettings)
+        let jetpackButton = JetpackButton.makeBadgeView(title: textProvider.brandingText(),
+                                                        target: self,
+                                                        selector: #selector(jetpackButtonTapped))
+
+        return jetpackButton
+    }
+
+    @objc private func jetpackButtonTapped() {
+        JetpackBrandingCoordinator.presentOverlay(from: self)
+        JetpackBrandingAnalyticsHelper.trackJetpackPoweredBadgeTapped(screen: .appSettings)
     }
 }

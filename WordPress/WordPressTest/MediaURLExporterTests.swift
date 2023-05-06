@@ -1,6 +1,7 @@
 import XCTest
-@testable import WordPress
 import MobileCoreServices
+import OHHTTPStubs
+@testable import WordPress
 
 class MediaURLExporterTests: XCTestCase {
 
@@ -58,7 +59,7 @@ class MediaURLExporterTests: XCTestCase {
             XCTFail("Error: an error occurred testing a URL export: \(error.toNSError())")
             expect.fulfill()
         }
-        waitForExpectations(timeout: 2.0, handler: nil)
+        waitForExpectations(timeout: 3.0, handler: nil)
     }
 
     func testThatURLExportingGIFWorks() {

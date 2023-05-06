@@ -16,18 +16,15 @@ enum EditMode {
 }
 
 typealias EditorViewController = UIViewController & PostEditor
+typealias ReplaceEditorCallback = (EditorViewController, EditorViewController) -> ()
 
 /// Common interface to all editors
 ///
-protocol PostEditor: class, UIViewControllerTransitioningDelegate {
+protocol PostEditor: PublishingEditor, UIViewControllerTransitioningDelegate {
 
     /// The post being edited.
     ///
     var post: AbstractPost { get set }
-
-    /// Closure to be executed when the editor gets closed.
-    ///
-    var onClose: ((_ changesSaved: Bool, _ shouldShowPostPost: Bool) -> Void)? { get set }
 
     /// Whether the editor should open directly to the media picker.
     ///
@@ -44,7 +41,7 @@ protocol PostEditor: class, UIViewControllerTransitioningDelegate {
     init(
         post: AbstractPost,
         loadAutosaveRevision: Bool,
-        replaceEditor: @escaping (EditorViewController, EditorViewController) -> (),
+        replaceEditor: @escaping ReplaceEditorCallback,
         editorSession: PostEditorAnalyticsSession?)
 
     /// Media items to be inserted on the post after creation
@@ -62,8 +59,6 @@ protocol PostEditor: class, UIViewControllerTransitioningDelegate {
     var hasFailedMedia: Bool { get }
 
     var isUploadingMedia: Bool { get }
-
-    func removeFailedMedia()
 
     /// Verification prompt helper
     var verificationPromptHelper: VerificationPromptHelper? { get }
@@ -95,9 +90,6 @@ protocol PostEditor: class, UIViewControllerTransitioningDelegate {
     /// Returns the media attachment removed version of html
     func contentByStrippingMediaAttachments() -> String
 
-    /// Debouncer used to save the post locally with a delay
-    var debouncer: Debouncer { get }
-
     /// Navigation bar manager for this post editor
     var navigationBarManager: PostEditorNavigationBarManager { get }
 
@@ -106,11 +98,15 @@ protocol PostEditor: class, UIViewControllerTransitioningDelegate {
 
     /// Closure to call when the editor needs to be replaced with a different editor
     /// First argument is the existing editor, second argument is the replacement editor
-    var replaceEditor: (EditorViewController, EditorViewController) -> () { get }
+    var replaceEditor: ReplaceEditorCallback { get }
 
     var autosaver: Autosaver { get set }
+
     /// true if the post is the result of a reblog
     var postIsReblogged: Bool { get set }
+
+    /// From where the editor was shown (for analytics reporting)
+    var entryPoint: PostEditorEntryPoint { get set }
 }
 
 extension PostEditor {
@@ -133,19 +129,34 @@ extension PostEditor {
     }
 
     var currentBlogCount: Int {
-        let service = BlogService(managedObjectContext: mainContext)
-        return postIsReblogged ? service.blogCountForWPComAccounts() : service.blogCountForAllAccounts()
+        return postIsReblogged ? BlogQuery().hostedByWPCom(true).count(in: mainContext) : Blog.count(in: mainContext)
     }
 
     var isSingleSiteMode: Bool {
         return currentBlogCount <= 1 || post.hasRemote()
     }
 
-    var uploadFailureNoticeTag: Notice.Tag {
-        return "PostEditor.UploadFailed"
+    var alertBarButtonItem: UIBarButtonItem? {
+        return navigationBarManager.closeBarButtonItem
     }
 
-    func uploadFailureNotice(action: PostEditorAction) -> Notice {
-        return Notice(title: action.publishingErrorLabel, tag: uploadFailureNoticeTag)
+    var prepublishingSourceView: UIView? {
+        return navigationBarManager.publishButton
     }
+
+    var prepublishingIdentifiers: [PrepublishingIdentifier] {
+        return [.visibility, .schedule, .tags, .categories]
+    }
+}
+
+enum PostEditorEntryPoint: String {
+    case unknown
+    case postsList
+    case pagesList
+    case dashboard
+    case bloggingPromptsFeatureIntroduction = "blogging_prompts_introduction"
+    case bloggingPromptsActionSheetHeader = "add_new_sheet_answer_prompt"
+    case bloggingPromptsNotification = "blogging_reminders_notification_answer_prompt"
+    case bloggingPromptsDashboardCard = "my_site_card_answer_prompt"
+    case bloggingPromptsListView = "blogging_prompts_list_view"
 }

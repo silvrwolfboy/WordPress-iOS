@@ -8,11 +8,10 @@ import Foundation
     ///
     @objc static func isDotcomAvailable() -> Bool {
         let context = ContextManager.sharedInstance().mainContext
-        let service = AccountService(managedObjectContext: context)
         var available = false
 
         context.performAndWait {
-            available = service.defaultWordPressComAccount() != nil
+            available = (try? WPAccount.lookupDefaultWordPressComAccount(in: context)) != nil
         }
 
         return available
@@ -26,24 +25,31 @@ import Foundation
 
     @objc static var noSelfHostedBlogs: Bool {
         let context = ContextManager.sharedInstance().mainContext
-        let blogService = BlogService(managedObjectContext: context)
+        return BlogQuery().hostedByWPCom(false).count(in: context) == 0 && (try? Blog.hasAnyJetpackBlogs(in: context)) == false
+    }
 
-        return blogService.blogCountSelfHosted() == 0 && blogService.hasAnyJetpackBlogs() == false
+    static var hasBlogs: Bool {
+        let context = ContextManager.sharedInstance().mainContext
+        return Blog.count(in: context) > 0
     }
 
     @objc static var noWordPressDotComAccount: Bool {
         return !AccountHelper.isDotcomAvailable()
     }
 
+    static var defaultSiteId: NSNumber? {
+        let context = ContextManager.sharedInstance().mainContext
+        let account = try? WPAccount.lookupDefaultWordPressComAccount(in: context)
+        return account?.defaultBlog?.dotComID
+    }
+
     static func logBlogsAndAccounts(context: NSManagedObjectContext) {
-        let accountService = AccountService(managedObjectContext: context)
-        let blogService = BlogService(managedObjectContext: context)
-        let allBlogs = blogService.blogsForAllAccounts()
+        let allBlogs = (try? BlogQuery().blogs(in: context)) ?? []
         let blogsByAccount = Dictionary(grouping: allBlogs, by: { $0.account })
 
-        let defaultAccount = accountService.defaultWordPressComAccount()
+        let defaultAccount = try? WPAccount.lookupDefaultWordPressComAccount(in: context)
 
-        let accountCount = accountService.numberOfAccounts()
+        let accountCount = (try? WPAccount.lookupNumberOfAccounts(in: context)) ?? 0
         let otherAccounts = accountCount > 1 ? " + \(accountCount - 1) others" : ""
         let accountsDescription = "wp.com account: " + (defaultAccount?.logDescription ?? "<none>") + otherAccounts
 
@@ -63,9 +69,26 @@ import Foundation
     }
 
     static func logOutDefaultWordPressComAccount() {
-        let context = ContextManager.sharedInstance().mainContext
-        let service = AccountService(managedObjectContext: context)
+        // Unschedule any scheduled blogging reminders
+        let service = AccountService(coreDataStack: ContextManager.sharedInstance())
+
+        // Unschedule any scheduled blogging reminders for the account's blogs.
+        // We don't just clear all reminders, in case the user has self-hosted
+        // sites added to the app.
+        if let account = try? WPAccount.lookupDefaultWordPressComAccount(in: ContextManager.shared.mainContext),
+           let blogs = account.blogs,
+           let scheduler = try? ReminderScheduleCoordinator() {
+            blogs.forEach { scheduler.unschedule(for: $0) }
+        }
+
         service.removeDefaultWordPressComAccount()
+
+        deleteAccountData()
+    }
+
+    @objc static func deleteAccountData() {
+        // Delete saved dashboard states
+        BlogDashboardState.resetAllStates()
 
         // Delete local notification on logout
         PushNotificationsManager.shared.deletePendingLocalNotifications()
@@ -77,8 +100,12 @@ import Foundation
         StatsDataHelper.clearWidgetsData()
 
         // Delete donated user activities (e.g., for Siri Shortcuts)
-        if #available(iOS 12.0, *) {
-            NSUserActivity.deleteAllSavedUserActivities {}
-        }
+        NSUserActivity.deleteAllSavedUserActivities {}
+
+        // Refresh Remote Feature Flags
+        WordPressAppDelegate.shared?.updateFeatureFlags()
+
+        // Delete all the logs after logging out
+        WPLogger.shared().deleteAllLogs()
     }
 }

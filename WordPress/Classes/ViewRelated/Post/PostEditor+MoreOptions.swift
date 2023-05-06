@@ -1,7 +1,7 @@
 import Foundation
 import WordPressFlux
 
-extension PostEditor where Self: UIViewController {
+extension PostEditor {
 
     func displayPostSettings() {
         let settingsViewController: PostSettingsViewController
@@ -10,6 +10,7 @@ extension PostEditor where Self: UIViewController {
         } else {
             settingsViewController = PostSettingsViewController(post: post)
         }
+        settingsViewController.featuredImageDelegate = self as? FeaturedImageDelegate
         settingsViewController.hidesBottomBarWhenPushed = true
         self.navigationController?.pushViewController(settingsViewController, animated: true)
     }
@@ -32,7 +33,7 @@ extension PostEditor where Self: UIViewController {
             return
         }
 
-        navigationBarManager.reloadLeftBarButtonItems(navigationBarManager.generatingPreviewLeftBarButtonItems)
+        navigationBarManager.reloadTitleView(navigationBarManager.generatingPreviewTitleView)
 
         postService.autoSave(post, success: { [weak self] savedPost, previewURL in
 
@@ -65,12 +66,26 @@ extension PostEditor where Self: UIViewController {
     }
 
     func displayPreview() {
+        guard !isUploadingMedia else {
+            displayMediaIsUploadingAlert()
+            return
+        }
+
+        guard post.remoteStatus != .pushing else {
+            displayPostIsUploadingAlert()
+            return
+        }
+
+        emitPostSaveEvent()
+
         savePostBeforePreview() { [weak self] previewURLString, error in
             guard let self = self else {
                 return
             }
+
             let navigationBarManager = self.navigationBarManager
-            navigationBarManager.reloadLeftBarButtonItems(navigationBarManager.leftBarButtonItems)
+            navigationBarManager.reloadTitleView(navigationBarManager.blogTitleViewLabel)
+
             if error != nil {
                 let title = NSLocalizedString("Preview Unavailable", comment: "Title on display preview error" )
                 self.displayPreviewNotAvailable(title: title)
@@ -79,17 +94,20 @@ extension PostEditor where Self: UIViewController {
 
             let previewController: PreviewWebKitViewController
             if let previewURLString = previewURLString, let previewURL = URL(string: previewURLString) {
-                previewController = PreviewWebKitViewController(post: self.post, previewURL: previewURL)
+                previewController = PreviewWebKitViewController(post: self.post, previewURL: previewURL, source: "edit_post_more_preview")
             } else {
                 if self.post.permaLink == nil {
                     DDLogError("displayPreview: Post permalink is unexpectedly nil")
                     self.displayPreviewNotAvailable(title: NSLocalizedString("Preview Unavailable", comment: "Title on display preview error" ))
                     return
                 }
-                previewController = PreviewWebKitViewController(post: self.post)
+                previewController = PreviewWebKitViewController(post: self.post, source: "edit_post_more_preview")
             }
             previewController.trackOpenEvent()
             let navWrapper = LightNavigationController(rootViewController: previewController)
+            if self.navigationController?.traitCollection.userInterfaceIdiom == .pad {
+                navWrapper.modalPresentationStyle = .fullScreen
+            }
             self.navigationController?.present(navWrapper, animated: true)
         }
     }

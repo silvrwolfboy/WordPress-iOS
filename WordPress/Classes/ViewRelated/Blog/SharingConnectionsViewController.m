@@ -33,7 +33,7 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 - (instancetype)initWithBlog:(Blog *)blog publicizeService:(PublicizeService *)publicizeService
 {
     NSParameterAssert([blog isKindOfClass:[Blog class]]);
-    self = [self initWithStyle:UITableViewStyleGrouped];
+    self = [self initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
         _blog = blog;
         _publicizeService = publicizeService;
@@ -110,7 +110,7 @@ static NSString *const CellIdentifier = @"CellIdentifier";
     if ([self hasConnectedAccounts] && section == 0) {
         title = NSLocalizedString(@"Connected Accounts", @"Noun. Title. Title for the list of accounts for third party sharing services.");
     } else {
-        NSString *format = NSLocalizedString(@"Publicize to %@", @"Title. `Publicize` is used as a verb here but `Share` (verb) would also work here. The `%@` is a placeholder for the service name.");
+        NSString *format = NSLocalizedString(@"Share post to %@", @"Title. `The `%@` is a placeholder for the service name.");
         title = [NSString stringWithFormat:format, self.publicizeService.label];
     }
     return title;
@@ -164,7 +164,7 @@ static NSString *const CellIdentifier = @"CellIdentifier";
     cell.textLabel.textAlignment = NSTextAlignmentCenter;
     cell.textLabel.text = [self titleForConnectionCell];
     if (self.connecting) {
-        UIActivityIndicatorView *activityView = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
+        UIActivityIndicatorView *activityView = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
         cell.accessoryView = activityView;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         [activityView startAnimating];
@@ -257,6 +257,8 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 
 - (void)sharingAuthorizationHelper:(SharingAuthorizationHelper *)helper didConnectToService:(PublicizeService *)service withPublicizeConnection:(PublicizeConnection *)keyringConnection
 {
+    [[QuickStartTourGuide shared] completeSharingTourForBlog:self.blog];
+
     self.connecting = NO;
     [self.tableView reloadData];
     [self showDetailForConnection:keyringConnection];
@@ -278,7 +280,7 @@ static NSString *const CellIdentifier = @"CellIdentifier";
     __weak SharingConnectionsViewController *sharingConnectionsVC = self;
     UIAlertAction* continueAction = [UIAlertAction actionWithTitle:validationError.continueTitle
                                                               style:UIAlertActionStyleDefault
-                                                          handler:^(UIAlertAction * action) {
+                                                          handler:^(UIAlertAction * __unused action) {
                                                               if (validationError.continueURL) {
                                                                   [sharingConnectionsVC handleContinueURLTapped: validationError.continueURL];
                                                               }

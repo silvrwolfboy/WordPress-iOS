@@ -103,6 +103,18 @@ struct NoticeNotificationInfo {
     }
 }
 
+/// Objective-C bridge for ActionDispatcher specific for notices.
+///
+class NoticesDispatch: NSObject {
+    @objc static func lock() -> Void {
+        ActionDispatcher.dispatch(NoticeAction.lock)
+    }
+
+    @objc static func unlock() -> Void {
+        ActionDispatcher.dispatch(NoticeAction.unlock)
+    }
+}
+
 /// NoticeActions can be posted to control or report the display of notices.
 ///
 enum NoticeAction: Action {
@@ -120,7 +132,7 @@ enum NoticeAction: Action {
     /// 4. MediaBrowser dispatches `dismiss` which dismisses **NoticeB**!
     ///
     /// If MediaBrowser used `clear` or `clearWithTag`, the NoticeB should not have been dismissed
-    /// prematurely. 
+    /// prematurely.
     case dismiss
     /// Removes the given `Notice` from the Store.
     case clear(Notice)
@@ -130,6 +142,10 @@ enum NoticeAction: Action {
     case clearWithTag(Notice.Tag)
     /// Removes all Notices except the current one.
     case empty
+    // Prevents the notices from showing up untill an unlock action.
+    case lock
+    // Show the missed notices.
+    case unlock
 }
 
 
@@ -150,6 +166,7 @@ struct NoticeStoreState {
 /// - SeeAlso: `NoticeAction`
 class NoticeStore: StatefulStore<NoticeStoreState> {
     private var pending = Queue<Notice>()
+    private var storeLocked = false
 
     init(dispatcher: ActionDispatcher = .global) {
         super.init(initialState: NoticeStoreState(), dispatcher: dispatcher)
@@ -170,6 +187,10 @@ class NoticeStore: StatefulStore<NoticeStoreState> {
             dequeueNotice()
         case .empty:
             emptyQueue()
+        case .lock:
+            lock()
+        case .unlock:
+            unlock()
         }
     }
 
@@ -183,7 +204,7 @@ class NoticeStore: StatefulStore<NoticeStoreState> {
     // MARK: - Action handlers
 
     private func enqueueNotice(_ notice: Notice) {
-        if state.notice == nil {
+        if state.notice == nil && !storeLocked {
             state.notice = notice
         } else {
             pending.push(notice)
@@ -191,7 +212,25 @@ class NoticeStore: StatefulStore<NoticeStoreState> {
     }
 
     private func dequeueNotice() {
-        state.notice = pending.pop()
+        if !storeLocked {
+            state.notice = pending.pop()
+        }
+    }
+
+    private func lock() {
+        if storeLocked {
+            return
+        }
+        state.notice = nil
+        storeLocked = true
+    }
+
+    private func unlock() {
+        if !storeLocked {
+            return
+        }
+        storeLocked = false
+        dequeueNotice()
     }
 
     private func clear(notice: Notice) {

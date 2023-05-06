@@ -11,6 +11,13 @@ import UserNotifications
 ///
 final public class PushNotificationsManager: NSObject {
 
+    // MARK: Initializer
+
+    override init() {
+        super.init()
+        registerForNotifications()
+    }
+
     /// Returns the shared PushNotificationsManager instance.
     ///
     @objc static let shared = PushNotificationsManager()
@@ -20,10 +27,10 @@ final public class PushNotificationsManager: NSObject {
     ///
     @objc var deviceToken: String? {
         get {
-            return UserDefaults.standard.string(forKey: Device.tokenKey) ?? String()
+            return UserPersistentStoreFactory.instance().string(forKey: Device.tokenKey) ?? String()
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Device.tokenKey)
+            UserPersistentStoreFactory.instance().set(newValue, forKey: Device.tokenKey)
         }
     }
 
@@ -32,10 +39,10 @@ final public class PushNotificationsManager: NSObject {
     ///
     @objc var deviceId: String? {
         get {
-            return UserDefaults.standard.string(forKey: Device.idKey) ?? String()
+            return UserPersistentStoreFactory.instance().string(forKey: Device.idKey) ?? String()
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Device.idKey)
+            UserPersistentStoreFactory.instance().set(newValue, forKey: Device.idKey)
         }
     }
 
@@ -53,14 +60,31 @@ final public class PushNotificationsManager: NSObject {
         return sharedApplication.applicationState
     }
 
+    private var didRegisterForRemoteNotifications = false
 
+
+    /// Enables or disables remote notifications based on current settings.
     /// Registers the device for Remote Notifications: Badge + Sounds + Alerts
     ///
-    @objc func registerForRemoteNotifications() {
+    @objc func setupRemoteNotifications() {
+        guard JetpackNotificationMigrationService.shared.shouldPresentNotifications() else {
+            disableRemoteNotifications()
+            return
+        }
+
         sharedApplication.registerForRemoteNotifications()
+        didRegisterForRemoteNotifications = true
+        return
     }
 
-
+    private func disableRemoteNotifications() {
+        if !didRegisterForRemoteNotifications {
+            sharedApplication.registerForRemoteNotifications()
+        }
+        sharedApplication.unregisterForRemoteNotifications()
+        sharedApplication.applicationIconBadgeNumber = 0
+        didRegisterForRemoteNotifications = false
+    }
 
     /// Checks asynchronously if Notifications are enabled in the Device's Settings, or not.
     ///
@@ -101,7 +125,7 @@ final public class PushNotificationsManager: NSObject {
         deviceToken = newToken
 
         // Register against WordPress.com
-        let noteService = NotificationSettingsService(managedObjectContext: ContextManager.sharedInstance().mainContext)
+        let noteService = NotificationSettingsService(coreDataStack: ContextManager.sharedInstance())
 
         noteService.registerDeviceForPushNotifications(newToken, success: { deviceId in
             DDLogVerbose("Successfully registered Device ID \(deviceId) for Push Notifications")
@@ -138,7 +162,7 @@ final public class PushNotificationsManager: NSObject {
 
         ZendeskUtils.unregisterDevice()
 
-        let noteService = NotificationSettingsService(managedObjectContext: ContextManager.sharedInstance().mainContext)
+        let noteService = NotificationSettingsService(coreDataStack: ContextManager.sharedInstance())
 
         noteService.unregisterDeviceForPushNotifications(knownDeviceId, success: {
             DDLogInfo("Successfully unregistered Device ID \(knownDeviceId) for Push Notifications!")
@@ -157,9 +181,10 @@ final public class PushNotificationsManager: NSObject {
     ///
     /// - Parameters:
     ///     - userInfo: The Notification's Payload
+    ///     - userInteraction: Indicates if the user interacted with the Push Notification
     ///     - completionHandler: A callback, to be executed on completion
     ///
-    @objc func handleNotification(_ userInfo: NSDictionary, completionHandler: ((UIBackgroundFetchResult) -> Void)?) {
+    @objc func handleNotification(_ userInfo: NSDictionary, userInteraction: Bool = false, completionHandler: ((UIBackgroundFetchResult) -> Void)?) {
         DDLogVerbose("Received push notification:\nPayload: \(userInfo)\n")
         DDLogVerbose("Current Application state: \(applicationState.rawValue)")
 
@@ -184,7 +209,7 @@ final public class PushNotificationsManager: NSObject {
                         handleQuickStartLocalNotification]
 
         for handler in handlers {
-            if handler(userInfo, completionHandler) {
+            if handler(userInfo, userInteraction, completionHandler) {
                 break
             }
         }
@@ -212,6 +237,13 @@ final public class PushNotificationsManager: NSObject {
         let event: WPAnalyticsStat = (applicationState == .background) ? .pushNotificationReceived : .pushNotificationAlertPressed
         WPAnalytics.track(event, withProperties: properties)
     }
+
+    // MARK: Observing Notifications
+
+    private func registerForNotifications() {
+        let notificationCenter = NotificationCenter.default
+        notificationCenter.addObserver(self, selector: #selector(setupRemoteNotifications), name: .WPAppUITypeChanged, object: nil)
+    }
 }
 
 
@@ -230,7 +262,7 @@ extension PushNotificationsManager {
     ///
     /// - Returns: True when handled. False otherwise
     ///
-    @objc func handleSupportNotification(_ userInfo: NSDictionary, completionHandler: ((UIBackgroundFetchResult) -> Void)?) -> Bool {
+    @objc func handleSupportNotification(_ userInfo: NSDictionary, userInteraction: Bool, completionHandler: ((UIBackgroundFetchResult) -> Void)?) -> Bool {
 
         guard let type = userInfo.string(forKey: ZendeskUtils.PushNotificationIdentifiers.key),
             type == ZendeskUtils.PushNotificationIdentifiers.type else {
@@ -243,7 +275,7 @@ extension PushNotificationsManager {
         WPAnalytics.track(.supportReceivedResponseFromSupport)
 
         if applicationState == .background {
-            WPTabBarController.sharedInstance().showMeScene()
+            RootViewCoordinator.sharedPresenter.showMeScene()
         }
 
         completionHandler?(.newData)
@@ -263,7 +295,7 @@ extension PushNotificationsManager {
     ///
     /// - Returns: True when handled. False otherwise
     ///
-    @objc func handleAuthenticationNotification(_ userInfo: NSDictionary, completionHandler: ((UIBackgroundFetchResult) -> Void)?) -> Bool {
+    @objc func handleAuthenticationNotification(_ userInfo: NSDictionary, userInteraction: Bool, completionHandler: ((UIBackgroundFetchResult) -> Void)?) -> Bool {
         // WordPress.com Push Authentication Notification
         // Due to the Background Notifications entitlement, any given Push Notification's userInfo might be received
         // while the app is in BG, and when it's about to become active. In order to prevent UI glitches, let's skip
@@ -274,12 +306,38 @@ extension PushNotificationsManager {
             return false
         }
 
-        if applicationState != .background {
+        /// This is a (hopefully temporary) workaround. A Push Authentication must be dealt with whenever:
+        ///
+        ///     1.  When the user interacts with a Push Notification
+        ///     2.  When the App is in Foreground
+        ///
+        /// As per iOS 13 there are certain scenarios in which the `applicationState` may be `.background` when the user pressed over the Alert.
+        /// By means of the `userInteraction` flag, we're just working around the new SDK behavior.
+        ///
+        /// Proper fix involves a full refactor, and definitely stop checking on `applicationState`, since it's not reliable anymore.
+        ///
+        if applicationState != .background || userInteraction {
             authenticationManager.handleAuthenticationNotification(userInfo)
+        } else {
+            DDLogInfo("Skipping handling authentication notification due to app being in background or user not interacting with it.")
         }
 
         completionHandler?(.newData)
 
+        return true
+    }
+
+    /// A handler for a 2fa auth notification approval action.
+    ///
+    /// - Parameter userInfo: The Notification's Payload
+    /// - Returns: True if successful. False otherwise.
+    ///
+    @objc func handleAuthenticationApprovedAction(_ userInfo: NSDictionary) -> Bool {
+        let authenticationManager = PushAuthenticationManager()
+        guard authenticationManager.isAuthenticationNotification(userInfo) else {
+            return false
+        }
+        authenticationManager.handleAuthenticationApprovedAction(userInfo)
         return true
     }
 
@@ -295,7 +353,7 @@ extension PushNotificationsManager {
     ///
     /// - Returns: True when handled. False otherwise
     ///
-    @objc func handleInactiveNotification(_ userInfo: NSDictionary, completionHandler: ((UIBackgroundFetchResult) -> Void)?) -> Bool {
+    @objc func handleInactiveNotification(_ userInfo: NSDictionary, userInteraction: Bool, completionHandler: ((UIBackgroundFetchResult) -> Void)?) -> Bool {
         guard applicationState == .inactive else {
             return false
         }
@@ -304,7 +362,7 @@ extension PushNotificationsManager {
             return false
         }
 
-        WPTabBarController.sharedInstance().showNotificationsTabForNote(withID: notificationId)
+        RootViewCoordinator.sharedPresenter.showNotificationsTabForNote(withID: notificationId)
         completionHandler?(.newData)
 
         return true
@@ -322,7 +380,7 @@ extension PushNotificationsManager {
     ///
     /// - Returns: True when handled. False otherwise
     ///
-    @objc func handleBackgroundNotification(_ userInfo: NSDictionary, completionHandler: ((UIBackgroundFetchResult) -> Void)?) -> Bool {
+    @objc func handleBackgroundNotification(_ userInfo: NSDictionary, userInteraction: Bool, completionHandler: ((UIBackgroundFetchResult) -> Void)?) -> Bool {
         guard userInfo.number(forKey: Notification.identifierKey)?.stringValue != nil else {
             return false
         }
@@ -366,6 +424,7 @@ extension PushNotificationsManager {
         static let originKey = "origin"
         static let badgeResetValue = "badge-reset"
         static let local = "qs-local-notification"
+        static let bloggingPrompts = "blogging-prompts-notification"
     }
 
     enum Tracking {
@@ -389,20 +448,24 @@ extension PushNotificationsManager {
     ///     - completionHandler: A callback, to be executed on completion
     ///
     /// - Returns: True when handled. False otherwise
-    @objc func handleQuickStartLocalNotification(_ userInfo: NSDictionary, completionHandler: ((UIBackgroundFetchResult) -> Void)?) -> Bool {
+    @objc func handleQuickStartLocalNotification(_ userInfo: NSDictionary, userInteraction: Bool, completionHandler: ((UIBackgroundFetchResult) -> Void)?) -> Bool {
         guard let type = userInfo.string(forKey: Notification.typeKey),
             type == Notification.local else {
                 return false
         }
 
-        if WPTabBarController.sharedInstance()?.presentedViewController != nil {
-            WPTabBarController.sharedInstance()?.dismiss(animated: false)
-        }
-        WPTabBarController.sharedInstance()?.showMySitesTab()
+        let rootViewController = RootViewCoordinator.sharedPresenter.rootViewController
 
-        if let taskName = userInfo.string(forKey: QuickStartTracking.taskNameKey) {
+        if rootViewController.presentedViewController != nil {
+            rootViewController.dismiss(animated: false)
+        }
+        RootViewCoordinator.sharedPresenter.showMySitesTab()
+
+        if let taskName = userInfo.string(forKey: QuickStartTracking.taskNameKey),
+            let quickStartType = userInfo.string(forKey: QuickStartTracking.quickStartTypeKey) {
             WPAnalytics.track(.quickStartNotificationTapped,
-                              withProperties: [QuickStartTracking.taskNameKey: taskName])
+                              withProperties: [QuickStartTracking.taskNameKey: taskName,
+                                               WPAnalytics.WPAppAnalyticsKeyQuickStartSiteType: quickStartType])
         }
 
         completionHandler?(.newData)
@@ -410,7 +473,7 @@ extension PushNotificationsManager {
         return true
     }
 
-    func postNotification(for tour: QuickStartTour) {
+    func postNotification(for tour: QuickStartTour, quickStartType: QuickStartType) {
         deletePendingLocalNotifications()
 
         let content = UNMutableNotificationContent()
@@ -432,7 +495,8 @@ extension PushNotificationsManager {
         UNUserNotificationCenter.current().add(request)
 
         WPAnalytics.track(.quickStartNotificationStarted,
-                          withProperties: [QuickStartTracking.taskNameKey: tour.analyticsKey])
+                          withProperties: [QuickStartTracking.taskNameKey: tour.analyticsKey,
+                                           WPAnalytics.WPAppAnalyticsKeyQuickStartSiteType: quickStartType.key])
     }
 
     @objc func deletePendingLocalNotifications() {
@@ -446,6 +510,7 @@ extension PushNotificationsManager {
 
     private enum QuickStartTracking {
         static let taskNameKey = "task_name"
+        static let quickStartTypeKey = "site_type"
     }
 }
 

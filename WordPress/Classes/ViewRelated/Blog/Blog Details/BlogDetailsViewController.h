@@ -1,19 +1,33 @@
 #import <UIKit/UIKit.h>
 
 @class Blog;
+@class BlogDetailHeaderView;
+@class CreateButtonCoordinator;
+@class IntrinsicTableView;
+@protocol BlogDetailHeader;
 
 typedef NS_ENUM(NSUInteger, BlogDetailsSectionCategory) {
+    BlogDetailsSectionCategoryQuickAction,
+    BlogDetailsSectionCategoryReminders,
     BlogDetailsSectionCategoryDomainCredit,
     BlogDetailsSectionCategoryQuickStart,
+    BlogDetailsSectionCategoryHome,
     BlogDetailsSectionCategoryGeneral,
-    BlogDetailsSectionCategoryPublish,
+    BlogDetailsSectionCategoryJetpack,
     BlogDetailsSectionCategoryPersonalize,
     BlogDetailsSectionCategoryConfigure,
     BlogDetailsSectionCategoryExternal,
-    BlogDetailsSectionCategoryRemoveSite
+    BlogDetailsSectionCategoryRemoveSite,
+    BlogDetailsSectionCategoryMigrationSuccess,
+    BlogDetailsSectionCategoryJetpackBrandingCard,
+    BlogDetailsSectionCategoryJetpackInstallCard,
+    BlogDetailsSectionCategoryContent,
+    BlogDetailsSectionCategoryTraffic,
+    BlogDetailsSectionCategoryMaintenance
 };
 
 typedef NS_ENUM(NSUInteger, BlogDetailsSubsection) {
+    BlogDetailsSubsectionReminders,
     BlogDetailsSubsectionDomainCredit,
     BlogDetailsSubsectionQuickStart,
     BlogDetailsSubsectionStats,
@@ -23,10 +37,15 @@ typedef NS_ENUM(NSUInteger, BlogDetailsSubsection) {
     BlogDetailsSubsectionMedia,
     BlogDetailsSubsectionPages,
     BlogDetailsSubsectionActivity,
+    BlogDetailsSubsectionJetpackSettings,
     BlogDetailsSubsectionComments,
     BlogDetailsSubsectionSharing,
     BlogDetailsSubsectionPeople,
-    BlogDetailsSubsectionPlugins
+    BlogDetailsSubsectionPlugins,
+    BlogDetailsSubsectionHome,
+    BlogDetailsSubsectionMigrationSuccess,
+    BlogDetailsSubsectionJetpackBrandingCard,
+    BlogDetailsSubsectionBlaze,
 };
 
 
@@ -49,8 +68,7 @@ typedef NS_ENUM(NSInteger, QuickStartTourElement) {
     QuickStartTourElementSharing = 8,
     QuickStartTourElementConnections = 9,
     QuickStartTourElementReaderTab = 10,
-    QuickStartTourElementReaderBack = 11,
-    QuickStartTourElementReaderSearch = 12,
+    QuickStartTourElementReaderDiscoverSettings = 12,
     QuickStartTourElementTourCompleted = 13,
     QuickStartTourElementCongratulations = 14,
     QuickStartTourElementSiteIcon = 15,
@@ -58,6 +76,13 @@ typedef NS_ENUM(NSInteger, QuickStartTourElement) {
     QuickStartTourElementNewPage = 17,
     QuickStartTourElementStats = 18,
     QuickStartTourElementPlans = 19,
+    QuickStartTourElementSiteTitle = 20,
+    QuickStartTourElementSiteMenu = 21,
+    QuickStartTourElementNotifications = 22,
+    QuickStartTourElementSetupQuickStart = 23,
+    QuickStartTourElementUpdateQuickStart = 24,
+    QuickStartTourElementMediaScreen = 25,
+    QuickStartTourElementMediaUpload = 26,
 };
 
 typedef NS_ENUM(NSUInteger, BlogDetailsNavigationSource) {
@@ -86,8 +111,9 @@ typedef NS_ENUM(NSUInteger, BlogDetailsNavigationSource) {
 @property (nonatomic, strong, nonnull) NSString *title;
 @property (nonatomic, strong, nonnull) NSString *identifier;
 @property (nonatomic, strong, nullable) NSString *accessibilityIdentifier;
+@property (nonatomic, strong, nullable) NSString *accessibilityHint;
 @property (nonatomic, strong, nonnull) UIImage *image;
-@property (nonatomic, strong, nonnull) UIColor *imageColor;
+@property (nonatomic, strong, nullable) UIColor *imageColor;
 @property (nonatomic, strong, nullable) UIView *accessoryView;
 @property (nonatomic, strong, nullable) NSString *detail;
 @property (nonatomic) BOOL showsSelectionState;
@@ -98,26 +124,49 @@ typedef NS_ENUM(NSUInteger, BlogDetailsNavigationSource) {
 @property (nonatomic) QuickStartTitleState quickStartTitleState;
 
 - (instancetype _Nonnull)initWithTitle:(NSString * __nonnull)title
-                   identifier:(NSString * __nonnull)identifier
-      accessibilityIdentifier:(NSString *__nullable)accessibilityIdentifier
-                        image:(UIImage * __nonnull)image
-                     callback:(void(^_Nullable)(void))callback;
+                            identifier:(NSString * __nonnull)identifier
+               accessibilityIdentifier:(NSString *__nullable)accessibilityIdentifier
+                                 image:(UIImage * __nonnull)image
+                              callback:(void(^_Nullable)(void))callback;
+
+- (instancetype _Nonnull)initWithTitle:(NSString * __nonnull)title
+                            identifier:(NSString * __nonnull)identifier
+               accessibilityIdentifier:(NSString *__nullable)accessibilityIdentifier
+                     accessibilityHint:(NSString *__nullable)accessibilityHint
+                                 image:(UIImage * __nonnull)image
+                              callback:(void(^_Nullable)(void))callback;
+
 - (instancetype _Nonnull)initWithTitle:(NSString * __nonnull)title
                accessibilityIdentifier:(NSString *__nullable)accessibilityIdentifier
                                  image:(UIImage * __nonnull)image
-                            imageColor:(UIColor * __nonnull)imageColor
+                            imageColor:(UIColor * __nullable)imageColor
+                              callback:(void(^_Nullable)(void))callback;
+
+- (instancetype _Nonnull)initWithTitle:(NSString * __nonnull)title
+               accessibilityIdentifier:(NSString *__nullable)accessibilityIdentifier
+                                 image:(UIImage * __nonnull)image
+                            imageColor:(UIColor * __nullable)imageColor
+                         renderingMode:(UIImageRenderingMode)renderingMode
                               callback:(void(^_Nullable)(void))callback;
 
 @end
 
 @protocol ScenePresenter;
 
-@interface BlogDetailsViewController : UITableViewController <UIViewControllerRestoration, UIViewControllerTransitioningDelegate> {
+@protocol BlogDetailsPresentationDelegate
+- (void)presentBlogDetailsViewController:(UIViewController * __nonnull)viewController;
+@end
+
+@interface BlogDetailsViewController : UIViewController <UIViewControllerRestoration, UIViewControllerTransitioningDelegate> {
     
 }
 
 @property (nonatomic, strong, nonnull) Blog * blog;
 @property (nonatomic, strong) id<ScenePresenter> _Nonnull meScenePresenter;
+@property (nonatomic, strong, readonly) CreateButtonCoordinator * _Nullable createButtonCoordinator;
+@property (nonatomic, strong, readwrite) UITableView * _Nonnull tableView;
+@property (nonatomic) BOOL shouldScrollToViewSite;
+@property (nonatomic, weak, nullable) id<BlogDetailsPresentationDelegate> presentationDelegate;
 
 - (id _Nonnull)initWithMeScenePresenter:(id<ScenePresenter> _Nonnull)meScenePresenter;
 - (void)showDetailViewForSubsection:(BlogDetailsSubsection)section;
@@ -125,10 +174,13 @@ typedef NS_ENUM(NSUInteger, BlogDetailsNavigationSource) {
 - (void)configureTableViewData;
 - (void)scrollToElement:(QuickStartTourElement)element;
 
+- (void)switchToBlog:(nonnull Blog *)blog;
+- (void)showInitialDetailsForBlog;
 - (void)showPostListFromSource:(BlogDetailsNavigationSource)source;
 - (void)showPageListFromSource:(BlogDetailsNavigationSource)source;
 - (void)showMediaLibraryFromSource:(BlogDetailsNavigationSource)source;
-- (void)showStatsFromSource:(BlogDetailsNavigationSource)sourc;;
-- (void)refreshSiteIcon;
-
+- (void)showStatsFromSource:(BlogDetailsNavigationSource)source;
+- (void)updateTableView:(nullable void(^)(void))completion;
+- (void)preloadMetadata;
+- (void)pulledToRefreshWith:(nonnull UIRefreshControl *)refreshControl onCompletion:(nullable void(^)(void))completion;
 @end

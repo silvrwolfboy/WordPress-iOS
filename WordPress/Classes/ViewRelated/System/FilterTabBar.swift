@@ -70,6 +70,7 @@ class FilterTabBar: UIControl {
         didSet {
             if let oldValue = oldValue {
                 NSLayoutConstraint.deactivate([oldValue])
+                tabBarHeightConstraint.isActive = true
             }
         }
     }
@@ -77,6 +78,12 @@ class FilterTabBar: UIControl {
     var tabBarHeight = AppearanceMetrics.height {
         didSet {
             tabBarHeightConstraint = heightAnchor.constraint(equalToConstant: tabBarHeight)
+        }
+    }
+
+    var tabBarHeightConstraintPriority: Float = UILayoutPriority.required.rawValue {
+        didSet {
+            tabBarHeightConstraint.priority = UILayoutPriority(tabBarHeightConstraintPriority)
         }
     }
 
@@ -202,37 +209,15 @@ class FilterTabBar: UIControl {
         commonInit()
     }
 
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        commonInit()
+    }
+
     private func commonInit() {
         tabBarHeightConstraint = heightAnchor.constraint(equalToConstant: tabBarHeight)
         tabBarHeightConstraint?.isActive = true
-
-        addSubview(scrollView)
-        NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -AppearanceMetrics.bottomDividerHeight),
-            scrollView.topAnchor.constraint(equalTo: topAnchor)
-            ])
-
-        scrollView.addSubview(stackView)
-
-        stackViewWidthConstraint = stackView.widthAnchor.constraint(equalTo: widthAnchor)
-
-        updateTabSizingConstraints()
-        activateTabSizingConstraints()
-
-        NSLayoutConstraint.activate([
-            stackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
-            stackView.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            stackView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -AppearanceMetrics.bottomDividerHeight),
-            stackView.topAnchor.constraint(equalTo: topAnchor)
-            ])
-
-        addSubview(selectionIndicator)
-        NSLayoutConstraint.activate([
-            selectionIndicator.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
-            selectionIndicator.heightAnchor.constraint(equalToConstant: AppearanceMetrics.selectionIndicatorHeight)
-        ])
 
         divider.backgroundColor = dividerColor
         addSubview(divider)
@@ -241,7 +226,38 @@ class FilterTabBar: UIControl {
             divider.trailingAnchor.constraint(equalTo: trailingAnchor),
             divider.bottomAnchor.constraint(equalTo: bottomAnchor),
             divider.heightAnchor.constraint(equalToConstant: AppearanceMetrics.bottomDividerHeight)
-            ])
+        ])
+
+        addSubview(scrollView)
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: divider.topAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor)
+        ])
+
+        scrollView.addSubview(stackView)
+        stackView.isLayoutMarginsRelativeArrangement = true
+        // We will manually constrain the stack view to the content layout guide
+        scrollView.contentInsetAdjustmentBehavior = .never
+
+        stackViewWidthConstraint = stackView.widthAnchor.constraint(equalTo: scrollView.safeAreaLayoutGuide.widthAnchor)
+
+        updateTabSizingConstraints()
+        activateTabSizingConstraints()
+
+        NSLayoutConstraint.activate([
+            stackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            stackView.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: divider.topAnchor),
+            stackView.topAnchor.constraint(equalTo: topAnchor)
+        ])
+
+        addSubview(selectionIndicator)
+        NSLayoutConstraint.activate([
+            selectionIndicator.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            selectionIndicator.heightAnchor.constraint(equalToConstant: AppearanceMetrics.selectionIndicatorHeight)
+        ])
     }
 
     // MARK: - Tabs
@@ -304,7 +320,7 @@ class FilterTabBar: UIControl {
         let padding = (tabSizingStyle == .equalWidths) ? 0 : AppearanceMetrics.horizontalPadding
 
         stackViewEdgeConstraints = [
-            stackView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor, constant: padding),
+            stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: padding),
             stackView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor, constant: -padding)
         ]
     }
@@ -346,7 +362,16 @@ class FilterTabBar: UIControl {
         }
     }
 
+    var currentlySelectedItem: FilterTabBarItem? {
+        return items[safe: selectedIndex]
+    }
+
     func setSelectedIndex(_ index: Int, animated: Bool = true) {
+        guard items.indices.contains(index) else {
+            DDLogError("FilterTabBar - Tried to set an invalid index")
+            return
+        }
+
         selectedIndex = index
 
         guard let tab = selectedTab else {
@@ -405,7 +430,7 @@ class FilterTabBar: UIControl {
     ///
     private func scroll(to tab: UIButton, animated: Bool = true) {
         // Check the bar has enough content to scroll
-        guard scrollView.contentSize.width > scrollView.frame.width else {
+        guard scrollView.contentSize.width > scrollView.frame.width, bounds.width > 0 else {
             return
         }
 
@@ -446,7 +471,7 @@ class FilterTabBar: UIControl {
 
     private enum AppearanceMetrics {
         static let height: CGFloat = 46.0
-        static let bottomDividerHeight: CGFloat = 0.5
+        static let bottomDividerHeight: CGFloat = .hairlineBorderWidth
         static let selectionIndicatorHeight: CGFloat = 2.0
         static let horizontalPadding: CGFloat = 0.0
         static let buttonInsets = UIEdgeInsets(top: 14.0, left: 12.0, bottom: 14.0, right: 12.0)

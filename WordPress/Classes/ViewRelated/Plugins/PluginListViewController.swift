@@ -95,6 +95,17 @@ class PluginListViewController: UITableViewController, ImmuTablePresenter {
         case .replace:
             tableView.reloadData()
         case .selective(let changedRows):
+            guard
+                // There is a strange scenario where the view model has multiple
+                // sections defined but the tableView thinks it has only zero,
+                // so make sure they are in agreement.
+                // See https://github.com/wordpress-mobile/WordPress-iOS/issues/14790
+                tableViewModel.sections.count == tableView.numberOfSections
+            else {
+                tableView.reloadData()
+                return
+            }
+
             if tableView.numberOfRows(inSection: 0) == changedRows.count {
                 let indexPaths = changedRows.map { IndexPath(row: $0, section: 0) }
                 tableView.reloadRows(at: indexPaths, with: .none)

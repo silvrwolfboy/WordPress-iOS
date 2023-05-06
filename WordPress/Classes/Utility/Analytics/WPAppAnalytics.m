@@ -1,11 +1,11 @@
 #import "WPAppAnalytics.h"
 
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "WPAnalyticsTrackerWPCom.h"
 #import "WPAnalyticsTrackerAutomatticTracks.h"
 #import "WPTabBarController.h"
-#import "ApiCredentials.h"
 #import "AccountService.h"
+#import "BlogService.h"
 #import "Blog.h"
 #import "AbstractPost.h"
 #import "WordPress-Swift.h"
@@ -14,20 +14,33 @@ NSString * const WPAppAnalyticsDefaultsUserOptedOut                 = @"tracks_o
 NSString * const WPAppAnalyticsDefaultsKeyUsageTracking_deprecated  = @"usage_tracking_enabled";
 NSString * const WPAppAnalyticsKeyBlogID                            = @"blog_id";
 NSString * const WPAppAnalyticsKeyPostID                            = @"post_id";
+NSString * const WPAppAnalyticsKeyPostAuthorID                      = @"post_author_id";
 NSString * const WPAppAnalyticsKeyFeedID                            = @"feed_id";
 NSString * const WPAppAnalyticsKeyFeedItemID                        = @"feed_item_id";
 NSString * const WPAppAnalyticsKeyIsJetpack                         = @"is_jetpack";
 NSString * const WPAppAnalyticsKeySessionCount                      = @"session_count";
+NSString * const WPAppAnalyticsKeySubscriptionCount                 = @"subscription_count";
 NSString * const WPAppAnalyticsKeyEditorSource                      = @"editor_source";
 NSString * const WPAppAnalyticsKeyCommentID                         = @"comment_id";
 NSString * const WPAppAnalyticsKeyLegacyQuickAction                 = @"is_quick_action";
 NSString * const WPAppAnalyticsKeyQuickAction                       = @"quick_action";
-
+NSString * const WPAppAnalyticsKeyFollowAction                      = @"follow_action";
 NSString * const WPAppAnalyticsKeySource                            = @"source";
+NSString * const WPAppAnalyticsKeyPostType                          = @"post_type";
+NSString * const WPAppAnalyticsKeyTapSource                         = @"tap_source";
+NSString * const WPAppAnalyticsKeyTabSource                         = @"tab_source";
+NSString * const WPAppAnalyticsKeyReplyingTo                        = @"replying_to";
+NSString * const WPAppAnalyticsKeySiteType                          = @"site_type";
 
 NSString * const WPAppAnalyticsKeyHasGutenbergBlocks                = @"has_gutenberg_blocks";
+NSString * const WPAppAnalyticsKeyHasStoriesBlocks                  = @"has_wp_stories_blocks";
+
 static NSString * const WPAppAnalyticsKeyLastVisibleScreen          = @"last_visible_screen";
 static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_app";
+
+NSString * const WPAppAnalyticsValueSiteTypeBlog                    = @"blog";
+NSString * const WPAppAnalyticsValueSiteTypeP2                      = @"p2";
+
 
 @interface WPAppAnalytics ()
 
@@ -35,8 +48,6 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
  *  @brief      Timestamp of the app's opening time.
  */
 @property (nonatomic, strong, readwrite) NSDate* applicationOpenedTime;
-
-@property (nonatomic, strong, readwrite) AccountService *accountService;
 
 /**
  *  @brief      If set, this block will be called whenever this object needs to know what the last
@@ -55,16 +66,13 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
     return nil;
 }
 
-- (instancetype)initWithAccountService:(AccountService *)accountService
-                lastVisibleScreenBlock:(WPAppAnalyticsLastVisibleScreenCallback)lastVisibleScreenCallback
+- (instancetype)initWithLastVisibleScreenBlock:(WPAppAnalyticsLastVisibleScreenCallback)lastVisibleScreenCallback;
 {
-    NSParameterAssert(accountService);
     NSParameterAssert(lastVisibleScreenCallback);
     
     self = [super init];
     
     if (self) {
-        _accountService = accountService;
         _lastVisibleScreenCallback = lastVisibleScreenCallback;
 
         [self initializeAppTracking];
@@ -84,7 +92,8 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
     [self initializeOptOutTracking];
 
     BOOL userHasOptedOut = [WPAppAnalytics userHasOptedOut];
-    if (!userHasOptedOut) {
+    BOOL isUITesting = [[NSProcessInfo processInfo].arguments containsObject:@"-ui-testing"];
+    if (!isUITesting && !userHasOptedOut) {
         [self registerTrackers];
         [self beginSession];
     }
@@ -100,6 +109,13 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
 {
     [WPAnalytics clearQueuedEvents];
     [WPAnalytics clearTrackers];
+}
+
++ (NSString *)siteTypeForBlogWithID:(NSNumber *)blogID
+{
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    Blog *blog = [Blog lookupWithID:blogID in:context];
+    return [blog isWPForTeams] ? WPAppAnalyticsValueSiteTypeP2 : WPAppAnalyticsValueSiteTypeBlog;
 }
 
 #pragma mark - Notifications
@@ -138,7 +154,8 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
 
 - (void)accountSettingsDidChange:(NSNotification*)notification
 {
-    WPAccount *defaultAccount = [self.accountService defaultWordPressComAccount];
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    WPAccount *defaultAccount = [WPAccount lookupDefaultWordPressComAccountInContext:context];
     if (!defaultAccount.settings) {
         return;
     }
@@ -184,9 +201,13 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
         analyticsProperties[WPAppAnalyticsKeyTimeInApp] = @(timeInApp);
         self.applicationOpenedTime = nil;
     }
+
+    [[ReaderTracker shared] stopAll];
+    [analyticsProperties addEntriesFromDictionary: [[ReaderTracker shared] data]];
     
     [WPAnalytics track:WPAnalyticsStatApplicationClosed withProperties:analyticsProperties];
     [WPAnalytics endSession];
+    [[ReaderTracker shared] reset];
 }
 
 /**
@@ -251,6 +272,9 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
     
     if (blogID) {
         [mutableProperties setObject:blogID forKey:WPAppAnalyticsKeyBlogID];
+
+        NSString *siteType = [self siteTypeForBlogWithID:blogID];
+        [mutableProperties setObject:siteType forKey:WPAppAnalyticsKeySiteType];
     }
     
     if ([mutableProperties count] > 0) {
@@ -276,6 +300,7 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
         mutableProperties[WPAppAnalyticsKeyPostID] = postOrPage.postID;
     }
     mutableProperties[WPAppAnalyticsKeyHasGutenbergBlocks] = @([postOrPage containsGutenbergBlocks]);
+    mutableProperties[WPAppAnalyticsKeyHasStoriesBlocks] = @([postOrPage containsStoriesBlocks]);
 
     [WPAppAnalytics track:stat withProperties:mutableProperties withBlog:postOrPage.blog];
 }
@@ -344,13 +369,13 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
 
 + (BOOL)isTrackingUsage
 {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:WPAppAnalyticsDefaultsKeyUsageTracking_deprecated];
+    return [[UserPersistentStoreFactory userDefaultsInstance] boolForKey:WPAppAnalyticsDefaultsKeyUsageTracking_deprecated];
 }
 
 - (void)setTrackingUsage:(BOOL)trackingUsage
 {
     if (trackingUsage != [WPAppAnalytics isTrackingUsage]) {
-        [[NSUserDefaults standardUserDefaults] setBool:trackingUsage
+        [[UserPersistentStoreFactory userDefaultsInstance] setBool:trackingUsage
                                                 forKey:WPAppAnalyticsDefaultsKeyUsageTracking_deprecated];
     }
 }
@@ -363,9 +388,9 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
         return;
     }
 
-    if ([[NSUserDefaults standardUserDefaults] objectForKey:WPAppAnalyticsDefaultsKeyUsageTracking_deprecated] == nil) {
+    if ([[UserPersistentStoreFactory userDefaultsInstance] objectForKey:WPAppAnalyticsDefaultsKeyUsageTracking_deprecated] == nil) {
         [self setUserHasOptedOutValue:NO];
-    } else if ([[NSUserDefaults standardUserDefaults] boolForKey:WPAppAnalyticsDefaultsKeyUsageTracking_deprecated] == NO) {
+    } else if ([[UserPersistentStoreFactory userDefaultsInstance] boolForKey:WPAppAnalyticsDefaultsKeyUsageTracking_deprecated] == NO) {
         // If the user has already explicitly disabled tracking,
         // then we should mirror that to the new setting
         [self setUserHasOptedOutValue:YES];
@@ -375,18 +400,18 @@ static NSString * const WPAppAnalyticsKeyTimeInApp                  = @"time_in_
 }
 
 + (BOOL)userHasOptedOutIsSet {
-    return [[NSUserDefaults standardUserDefaults] objectForKey:WPAppAnalyticsDefaultsUserOptedOut] != nil;
+    return [[UserPersistentStoreFactory userDefaultsInstance] objectForKey:WPAppAnalyticsDefaultsUserOptedOut] != nil;
 }
 
 + (BOOL)userHasOptedOut {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:WPAppAnalyticsDefaultsUserOptedOut];
+    return [[UserPersistentStoreFactory userDefaultsInstance] boolForKey:WPAppAnalyticsDefaultsUserOptedOut];
 }
 
 /// This method just sets the user defaults value for UserOptedOut, and doesn't
 /// do any additional configuration of sessions or trackers.
 - (void)setUserHasOptedOutValue:(BOOL)optedOut
 {
-    [[NSUserDefaults standardUserDefaults] setBool:optedOut forKey:WPAppAnalyticsDefaultsUserOptedOut];
+    [[UserPersistentStoreFactory userDefaultsInstance] setBool:optedOut forKey:WPAppAnalyticsDefaultsUserOptedOut];
 }
 
 - (void)setUserHasOptedOut:(BOOL)optedOut

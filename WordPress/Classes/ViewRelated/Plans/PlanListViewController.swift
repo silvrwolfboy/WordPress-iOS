@@ -33,7 +33,7 @@ final class PlanListViewController: UITableViewController, ImmuTablePresenter {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        WPStyleGuide.configureColors(view: view, tableView: tableView)
+        configureAppearance()
         ImmuTable.registerRows([PlanListRow.self], tableView: tableView)
         handler.viewModel = viewModel.tableViewModelWithPresenter(self)
         updateNoResults()
@@ -43,12 +43,12 @@ final class PlanListViewController: UITableViewController, ImmuTablePresenter {
 
     func syncPlans() {
         let context = ContextManager.shared.mainContext
-        let accountService = AccountService(managedObjectContext: context)
-        guard let account = accountService.defaultWordPressComAccount() else {
+
+        guard let account = try? WPAccount.lookupDefaultWordPressComAccount(in: context) else {
             return
         }
 
-        let plansService = PlanService.init(managedObjectContext: ContextManager.sharedInstance().mainContext)
+        let plansService = PlanService(coreDataStack: ContextManager.shared)
         plansService.getWpcomPlans(account,
                                    success: { [weak self] in
             self?.updateViewModel()
@@ -59,15 +59,21 @@ final class PlanListViewController: UITableViewController, ImmuTablePresenter {
     }
 
     func updateViewModel() {
-        let service = PlanService.init(managedObjectContext: ContextManager.sharedInstance().mainContext)
-        let allPlans = service.allPlans()
+        let contextManager = ContextManager.shared
+        let service = PlanService(coreDataStack: contextManager)
+        let allPlans = service.allPlans(in: contextManager.mainContext)
         guard allPlans.count > 0 else {
             viewModel = .error
             return
         }
-        viewModel = .ready(allPlans, service.allPlanFeatures())
+        viewModel = .ready(allPlans, service.allPlanFeatures(in: contextManager.mainContext))
     }
 
+    func configureAppearance() {
+        WPStyleGuide.configureColors(view: view, tableView: tableView)
+
+        extendedLayoutIncludesOpaqueBars = true
+    }
 
     // MARK: - ImmuTablePresenter
 

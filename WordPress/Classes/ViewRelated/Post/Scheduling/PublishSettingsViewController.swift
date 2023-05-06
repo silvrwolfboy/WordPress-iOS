@@ -12,11 +12,27 @@ struct PublishSettingsViewModel {
         case scheduled(Date)
         case published(Date)
         case immediately
+
+        init(post: AbstractPost) {
+            if let dateCreated = post.dateCreated, post.shouldPublishImmediately() == false {
+                self = post.hasFuturePublishDate() ? .scheduled(dateCreated) : .published(dateCreated)
+            } else {
+                self = .immediately
+            }
+        }
     }
 
     private(set) var state: State
     let timeZone: TimeZone
     let title: String?
+
+    var detailString: String {
+        if let date = date, !post.shouldPublishImmediately() {
+            return dateTimeFormatter.string(from: date)
+        } else {
+            return NSLocalizedString("Immediately", comment: "Undated post time label")
+        }
+    }
 
     private let post: AbstractPost
 
@@ -33,12 +49,10 @@ struct PublishSettingsViewModel {
         self.post = post
 
         title = post.postTitle
+        timeZone = post.blog.timeZone
 
-        dateFormatter = SiteDateFormatters.dateFormatter(for: post.blog, dateStyle: .long, timeStyle: .none, managedObjectContext: context)
-        dateTimeFormatter = SiteDateFormatters.dateFormatter(for: post.blog, dateStyle: .long, timeStyle: .short, managedObjectContext: context)
-
-        let blogService = BlogService(managedObjectContext: context)
-        timeZone = blogService.timeZone(for: post.blog)
+        dateFormatter = SiteDateFormatters.dateFormatter(for: timeZone, dateStyle: .long, timeStyle: .none)
+        dateTimeFormatter = SiteDateFormatters.dateFormatter(for: timeZone, dateStyle: .medium, timeStyle: .short)
     }
 
     var cells: [PublishSettingsCell] {
@@ -61,22 +75,24 @@ struct PublishSettingsViewModel {
 
     mutating func setDate(_ date: Date?) {
         if let date = date {
-            state = .scheduled(date)
+            // If a date to schedule the post was given
             post.dateCreated = date
-        } else {
-            state = .immediately
+            if post.shouldPublishImmediately() {
+                post.status = .publish
+            } else {
+                post.status = .scheduled
+            }
+        } else if post.originalIsDraft() {
+            // If the original is a draft, keep the post as a draft
+            post.status = .draft
+            post.publishImmediately()
+        } else if post.hasFuturePublishDate() {
+            // If the original is a already scheduled post, change it to publish immediately
+            // In this case the user had scheduled, but now wants to publish right away
+            post.publishImmediately()
         }
 
-        /// Set the post's status to scheduled or published depending on our date value
-        switch state {
-        case .scheduled:
-            post.status = .scheduled
-        case .immediately:
-            post.publishImmediately()
-        case .published:
-            /// Don't need to do anything for published states (based on previous logic in PostSettingsViewController)
-            break
-        }
+        state = State(post: post)
     }
 }
 
@@ -107,10 +123,13 @@ private struct DateAndTimeRow: ImmuTableRow {
 }
 
 @objc class PublishSettingsController: NSObject, SettingsController {
+    var trackingKey: String {
+        return "publish_settings"
+    }
 
     @objc class func viewController(post: AbstractPost) -> ImmuTableViewController {
         let controller = PublishSettingsController(post: post)
-        let viewController = ImmuTableViewController(controller: controller)
+        let viewController = ImmuTableViewController(controller: controller, style: .insetGrouped)
         controller.viewController = viewController
         return viewController
     }
@@ -147,15 +166,9 @@ private struct DateAndTimeRow: ImmuTableRow {
         let rows: [ImmuTableRow] = viewModel.cells.map { cell in
             switch cell {
             case .dateTime:
-                let detailString: String
-                if let date = viewModel.date {
-                    detailString = viewModel.dateTimeFormatter.string(from: date)
-                } else {
-                    detailString = NSLocalizedString("Immediately", comment: "Undated post time label")
-                }
                 return DateAndTimeRow(
                     title: NSLocalizedString("Date and Time", comment: "Date and Time"),
-                    detail: detailString,
+                    detail: viewModel.detailString,
                     accessibilityIdentifier: "Date and Time Row",
                     action: presenter.present(dateTimeCalendarViewController(with: viewModel))
                 )
@@ -188,42 +201,33 @@ private struct DateAndTimeRow: ImmuTableRow {
     }
 
     func dateTimeCalendarViewController(with model: PublishSettingsViewModel) -> (ImmuTableRow) -> UIViewController {
-        return { [weak self] row in
-
-            let schedulingCalendarViewController = SchedulingCalendarViewController()
-            schedulingCalendarViewController.coordinator = DateCoordinator(date: model.date, timeZone: model.timeZone, dateFormatter: model.dateFormatter, dateTimeFormatter: model.dateTimeFormatter) { [weak self] date in
+        return { [weak self] _ in
+            return PresentableSchedulingViewControllerProvider.viewController(sourceView: self?.viewController?.tableView,
+                                                                              sourceRect: self?.rectForSelectedRow() ?? .zero,
+                                                                              viewModel: model,
+                                                                              transitioningDelegate: self,
+                                                                              updated: { [weak self] date in
+                WPAnalytics.track(.editorPostScheduledChanged, properties: ["via": "settings"])
                 self?.viewModel.setDate(date)
                 NotificationCenter.default.post(name: Foundation.Notification.Name(rawValue: ImmuTableViewController.modelChangedNotification), object: nil)
-            }
-
-            return self?.calendarNavigationController(rootViewController: schedulingCalendarViewController) ?? UINavigationController()
+            },
+                                                                              onDismiss: nil)
         }
     }
 
-    private func calendarNavigationController(rootViewController: UIViewController) -> UINavigationController {
-        let navigationController = LightNavigationController(rootViewController: rootViewController)
-
-        if viewController?.traitCollection.userInterfaceIdiom == .pad {
-            navigationController.modalPresentationStyle = .popover
-        } else {
-            navigationController.modalPresentationStyle = .custom
-            navigationController.transitioningDelegate = self
+    private func rectForSelectedRow() -> CGRect? {
+        guard let viewController = viewController,
+              let selectedIndexPath = viewController.tableView.indexPathForSelectedRow else {
+            return nil
         }
-
-        if let popoverController = navigationController.popoverPresentationController,
-            let selectedIndexPath = viewController?.tableView.indexPathForSelectedRow {
-            popoverController.sourceView = viewController?.tableView
-            popoverController.sourceRect = viewController?.tableView.rectForRow(at: selectedIndexPath) ?? .zero
-        }
-
-        return navigationController
+        return viewController.tableView.rectForRow(at: selectedIndexPath)
     }
 }
 
 // The calendar sheet is shown towards the bottom half of the screen so a custom transitioning delegate is needed.
 extension PublishSettingsController: UIViewControllerTransitioningDelegate, UIAdaptivePresentationControllerDelegate {
     func presentationController(forPresented presented: UIViewController, presenting: UIViewController?, source: UIViewController) -> UIPresentationController? {
-        let presentationController = HalfScreenPresentationController(presentedViewController: presented, presenting: presenting)
+        let presentationController = PartScreenPresentationController(presentedViewController: presented, presenting: presenting)
         presentationController.delegate = self
         return presentationController
     }

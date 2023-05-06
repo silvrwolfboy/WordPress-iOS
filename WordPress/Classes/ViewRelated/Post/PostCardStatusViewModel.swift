@@ -13,9 +13,13 @@ class PostCardStatusViewModel: NSObject {
         case more
         case publish
         case stats
+        case duplicate
         case moveToDraft
         case trash
         case cancelAutoUpload
+        case share
+        case copyLink
+        case blaze
     }
 
     struct ButtonGroups: Equatable {
@@ -31,6 +35,8 @@ class PostCardStatusViewModel: NSObject {
     private let autoUploadInteractor = PostAutoUploadInteractor()
 
     private let isInternetReachable: Bool
+
+    private let isBlazeFlagEnabled: Bool
 
     var progressBlock: ((Float) -> Void)? = nil {
         didSet {
@@ -48,9 +54,12 @@ class PostCardStatusViewModel: NSObject {
         }
     }
 
-    init(post: Post, isInternetReachable: Bool = ReachabilityUtils.isInternetReachable()) {
+    init(post: Post,
+         isInternetReachable: Bool = ReachabilityUtils.isInternetReachable(),
+         isBlazeFlagEnabled: Bool = BlazeHelper.isBlazeFlagEnabled()) {
         self.post = post
         self.isInternetReachable = isInternetReachable
+        self.isBlazeFlagEnabled = isBlazeFlagEnabled
         super.init()
     }
 
@@ -176,11 +185,26 @@ class PostCardStatusViewModel: NSObject {
             }
 
             if post.status == .publish && post.hasRemote() {
-                buttons.append(.stats)
+                if JetpackFeaturesRemovalCoordinator.jetpackFeaturesEnabled() {
+                    buttons.append(.stats)
+                }
+                buttons.append(.share)
+            }
+
+            if isBlazeFlagEnabled && post.canBlaze {
+                buttons.append(.blaze)
+            }
+
+            if post.status == .publish || post.status == .draft {
+                buttons.append(.duplicate)
             }
 
             if post.status != .draft {
                 buttons.append(.moveToDraft)
+            }
+
+            if post.status != .trash {
+                buttons.append(.copyLink)
             }
 
             buttons.append(.trash)

@@ -16,10 +16,6 @@ import WordPressShared
 ///
 class WPRichContentView: UITextView {
 
-    /// Used to keep references to image attachments.
-    ///
-    var mediaArray = [RichMedia]()
-
     /// Manages the layout and positioning of text attachments.
     ///
     @objc lazy var attachmentManager: WPTextAttachmentManager = {
@@ -53,10 +49,7 @@ class WPRichContentView: UITextView {
         }
     }
 
-
-    /// Whether the view shows private content. Used when fetching images.
-    ///
-    @objc var isPrivate = false
+    var mediaHost: MediaHost = .publicSite
 
     @objc var content: String {
         get {
@@ -83,7 +76,6 @@ class WPRichContentView: UITextView {
         return formattedAttributedString(for: string, style: style)
     }
 
-    @available(iOS 13, *)
     class func formattedAttributedString(for string: String, style: UIUserInterfaceStyle) -> NSAttributedString {
         let trait = UITraitCollection(userInterfaceStyle: style)
         let style = AttributedStringStyle(textColorHex: UIColor.text.color(for: trait).hexString() ?? fallbackTextColorHex,
@@ -180,18 +172,20 @@ class WPRichContentView: UITextView {
 private extension WPRichContentView {
     class func formattedAttributedString(for string: String, style: AttributedStringStyle) -> NSAttributedString {
         let styleString = "<style>" +
-            "body { font:-apple-system-body; font-family: 'Noto Serif'; font-weight: normal; line-height:1.6; color: #\(style.textColorHex); }" +
+            "body, table { font:-apple-system-body; font-family: 'Noto Serif'; font-weight: normal; line-height:1.6; color: #\(style.textColorHex); }" +
             "blockquote { color:#\(style.blockQuoteColorHex); } " +
             "em, i { font:-apple-system-body; font-family: 'Noto Serif'; font-weight: normal; font-style: italic; line-height:1.6; } " +
             "a { color: #\(style.linkColorHex); text-decoration: none; } " +
             "a:active { color: #\(style.linkColorActiveHex); } " +
+            ".wp-block-table { margin: 0; padding: 0; } " +
+            "table { border-collapse: collapse }" +
+            "td { padding: 0.25em 0.25em 0.75em; min-width: 11em; vertical-align: top; } " +
         "</style>"
+
         let html = styleString + string
 
-        // Request the font to ensure it's loaded. Otherwise NSAttributedString
-        // falls back to Times New Roman :o
-        // https://github.com/wordpress-mobile/WordPress-iOS/issues/6564
-        _ = WPFontManager.notoItalicFont(ofSize: 16)
+        // Ensure the noto font family is fully loaded or the font defaults to Times New Roman.
+        WPFontManager.loadNotoFontFamily()
         do {
             if let attrTxt = try NSAttributedString.attributedStringFromHTMLString(html, defaultAttributes: nil) {
                 return attrTxt
@@ -342,30 +336,21 @@ extension WPRichContentView: WPTextAttachmentManagerDelegate {
             attachment.maxSize = CGSize(width: finalSize.width, height: finalSize.height)
         }
 
-        let contentInformation = ContentInformation(isPrivateOnWPCom: isPrivate, isSelfHostedWithCredentials: false)
-        let index = mediaArray.count
-        let indexPath = IndexPath(row: index, section: 1)
         weak var weakImage = image
 
-        image.loadImage(from: contentInformation, preferedSize: finalSize, indexPath: indexPath, onSuccess: { [weak self] indexPath in
-            guard
-                let richMedia = self?.mediaArray[indexPath.row],
-                let img = weakImage
-            else {
+        image.loadImage(from: mediaHost, preferedSize: finalSize, onSuccess: { [weak self] in
+            guard let img = weakImage else {
                 return
             }
 
-            richMedia.attachment.maxSize = img.contentSize()
+            attachment.maxSize = img.contentSize()
 
             if isUsingTemporaryLayoutDimensions {
                 self?.layoutAttachmentViews()
             }
-        }, onError: { (indexPath, error) in
+        }, onError: { (error) in
             DDLogError("\(String(describing: error))")
         })
-
-        let media = RichMedia(image: image, attachment: attachment)
-        mediaArray.append(media)
 
         return image
     }
@@ -419,12 +404,13 @@ extension WPRichContentView: WPTextAttachmentManagerDelegate {
     /// - Returns: An NSRange optional.
     ///
     func attachmentRangeForRichTextImage(_ richTextImage: WPRichTextImage) -> NSRange? {
-        for item in mediaArray {
-            if item.image == richTextImage {
-                return rangeOfAttachment(item.attachment)
-            }
+        guard let match = attachmentManager.attachmentViews.first( where: { (_, value) -> Bool in
+            return value.view == richTextImage
+        }) else {
+            return nil
         }
-        return nil
+
+        return rangeOfAttachment(match.key)
     }
 
 
@@ -468,18 +454,6 @@ private extension WPRichContentView {
 struct RichMedia {
     let image: WPRichTextImage
     let attachment: WPTextAttachment
-}
-
-// MARK: - ContentInformation (ImageSourceInformation)
-
-class ContentInformation: ImageSourceInformation {
-    var isPrivateOnWPCom: Bool
-    var isSelfHostedWithCredentials: Bool
-
-    init(isPrivateOnWPCom: Bool, isSelfHostedWithCredentials: Bool) {
-        self.isPrivateOnWPCom = isPrivateOnWPCom
-        self.isSelfHostedWithCredentials = isSelfHostedWithCredentials
-    }
 }
 
 // This is very much based on Aztec.LayoutManager — most of this code is pretty much copy-pasted

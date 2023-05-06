@@ -37,27 +37,27 @@ static NSInteger HideSearchMinSites = 3;
 
 + (UIViewController *)viewControllerWithRestorationIdentifierPath:(NSArray *)identifierComponents coder:(NSCoder *)coder
 {
-    return [[WPTabBarController sharedInstance] blogListViewController];
+    return nil;
 }
 
 - (instancetype)init
 {
+    return [self initWithMeScenePresenter:[MeScenePresenter new]];
+}
+
+- (instancetype)initWithMeScenePresenter:(id<ScenePresenter>)meScenePresenter
+{
     self = [super init];
+    
     if (self) {
         self.restorationIdentifier = NSStringFromClass([self class]);
         self.restorationClass = [self class];
+        _meScenePresenter = meScenePresenter;
+        
         [self configureDataSource];
         [self configureNavigationBar];
     }
-    return self;
-}
-
-- (id)initWithMeScenePresenter:(id<ScenePresenter>)meScenePresenter
-{
-    self = [self init];
-    if (self) {
-        self.meScenePresenter = meScenePresenter;
-    }
+    
     return self;
 }
 
@@ -65,6 +65,8 @@ static NSInteger HideSearchMinSites = 3;
 - (void)configureDataSource
 {
     self.dataSource = [BlogListDataSource new];
+    self.dataSource.shouldShowDisclosureIndicator = NO;
+    
     __weak __typeof(self) weakSelf = self;
     self.dataSource.visibilityChanged = ^(Blog *blog, BOOL visible) {
         [weakSelf setVisible:visible forBlog:blog];
@@ -88,8 +90,17 @@ static NSInteger HideSearchMinSites = 3;
     self.addSiteButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
                                                                        target:self
                                                                        action:@selector(addSite)];
+    self.addSiteButton.accessibilityIdentifier = @"add-site-button";
+
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancelTapped)];
+    self.navigationItem.leftBarButtonItem.accessibilityIdentifier = @"my-sites-cancel-button";
 
     self.navigationItem.title = NSLocalizedString(@"My Sites", @"");
+}
+
+- (void)cancelTapped
+{
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (NSString *)modelIdentifierForElementAtIndexPath:(NSIndexPath *)indexPath inView:(UIView *)view
@@ -143,6 +154,8 @@ static NSInteger HideSearchMinSites = 3;
 
     [self registerForAccountChangeNotification];
     [self registerForPostSignUpNotifications];
+
+    [WPAnalytics trackEvent:WPAnalyticsEventSiteSwitcherDisplayed];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -152,13 +165,12 @@ static NSInteger HideSearchMinSites = 3;
 
     self.visible = YES;
     [self.tableView reloadData];
-    [self updateEditButton];
+    [self updateBarButtons];
     [self updateSearchVisibility];
     [self maybeShowNUX];
     [self updateViewsForCurrentSiteCount];
     [self validateBlogDetailsViewController];
     [self syncBlogs];
-    [self setAddSiteBarButtonItem];
     [self updateCurrentBlogSelection];
 }
 
@@ -176,33 +188,23 @@ static NSInteger HideSearchMinSites = 3;
         [self.searchBar resignFirstResponder];
     }
     self.visible = NO;
+
+    [WPAnalytics trackEvent:WPAnalyticsEventSiteSwitcherDismissed];
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
 {
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
-    [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext>  _Nonnull context) {
+    [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext>  _Nonnull __unused context) {
         if (self.tableView.tableHeaderView == self.headerView) {
             [self updateHeaderSize];
             
             // this forces the tableHeaderView to resize
             self.tableView.tableHeaderView = self.headerView;
         }
-    } completion:^(id<UIViewControllerTransitionCoordinatorContext>  _Nonnull context) {
+    } completion:^(id<UIViewControllerTransitionCoordinatorContext>  _Nonnull __unused context) {
         [self updateCurrentBlogSelection];
     }];
-}
-
-
-- (void)updateEditButton
-{
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    if ([blogService blogCountForWPComAccounts] > 0) {
-        self.navigationItem.leftBarButtonItem = self.editButtonItem;
-    } else {
-        self.navigationItem.leftBarButtonItem = nil;
-    }
 }
 
 - (void)updateSearchVisibility
@@ -221,7 +223,7 @@ static NSInteger HideSearchMinSites = 3;
 
 - (void)maybeShowNUX
 {
-    NSInteger blogCount = self.dataSource.allBlogsCount;
+    NSInteger blogCount = self.dataSource.blogsCount;
     BOOL isLoggedIn = AccountHelper.isLoggedIn;
 
     if (blogCount > 0 && !isLoggedIn) {
@@ -229,14 +231,14 @@ static NSInteger HideSearchMinSites = 3;
     }
     
     if (![self defaultWordPressComAccount]) {
-        [[WordPressAppDelegate shared] showWelcomeScreenIfNeededAnimated:YES];
+        [[WordPressAppDelegate shared].windowManager showFullscreenSignIn];
         return;
     }
 }
 
 - (void)updateViewsForCurrentSiteCount
 {
-    NSUInteger count = self.dataSource.allBlogsCount;
+    NSUInteger count = self.dataSource.blogsCount;
     NSUInteger visibleSitesCount = self.dataSource.visibleBlogsCount;
     
     // Ensure No Results VC is not shown. Will be shown later if necessary.
@@ -270,7 +272,6 @@ static NSInteger HideSearchMinSites = 3;
     // added a new site so we should auto-select it
     if (self.noResultsViewController.beingPresented && siteCount == 1) {
         [self.noResultsViewController removeFromView];
-        [self bypassBlogListViewController];
     }
 
     [self instantiateNoResultsViewControllerIfNeeded];
@@ -278,6 +279,7 @@ static NSInteger HideSearchMinSites = 3;
     // If we have no sites, show the No Results VC.
     if (siteCount == 0) {
         [self.noResultsViewController configureWithTitle:NSLocalizedString(@"Create a new site for your business, magazine, or personal blog; or connect an existing WordPress installation.", "Text shown when the account has no sites.")
+                                         attributedTitle:nil
                                        noConnectionTitle:nil
                                              buttonTitle:NSLocalizedString(@"Add new site","Title of button to add a new site.")
                                                 subtitle:nil
@@ -295,7 +297,7 @@ static NSInteger HideSearchMinSites = 3;
 {
     [self instantiateNoResultsViewControllerIfNeeded];
     
-    NSUInteger count = self.dataSource.allBlogsCount;
+    NSUInteger count = self.dataSource.blogsCount;
     
     NSString *singularTitle = NSLocalizedString(@"You have 1 hidden WordPress site.", @"Message informing the user that all of their sites are currently hidden (singular)");
     
@@ -304,9 +306,10 @@ static NSInteger HideSearchMinSites = 3;
     
     NSString *buttonTitle = NSLocalizedString(@"Change Visibility", @"Button title to edit visibility of sites.");
     NSString *imageName = @"mysites-nosites";
-
+    
     if (count == 1) {
         [self.noResultsViewController configureWithTitle:singularTitle
+                                         attributedTitle:nil
                                        noConnectionTitle:nil
                                              buttonTitle:buttonTitle
                                                 subtitle:singularTitle
@@ -318,6 +321,7 @@ static NSInteger HideSearchMinSites = 3;
                                            accessoryView:nil];
     } else {
         [self.noResultsViewController configureWithTitle:multipleTitle
+                                         attributedTitle:nil
                                        noConnectionTitle:nil
                                              buttonTitle:buttonTitle
                                                 subtitle:multipleSubtitle
@@ -361,8 +365,7 @@ static NSInteger HideSearchMinSites = 3;
     }
 
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+    WPAccount *defaultAccount = [WPAccount lookupDefaultWordPressComAccountInContext:context];
 
     if (!defaultAccount) {
         [self handleSyncEnded];
@@ -380,15 +383,11 @@ static NSInteger HideSearchMinSites = 3;
         });
     };
 
-    context = [[ContextManager sharedInstance] newDerivedContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-
-    [context performBlock:^{
-        [blogService syncBlogsForAccount:defaultAccount success:^{
-            completionBlock();
-        } failure:^(NSError * _Nonnull error) {
-            completionBlock();
-        }];
+    BlogService *blogService = [[BlogService alloc] initWithCoreDataStack:[ContextManager sharedInstance]];
+    [blogService syncBlogsForAccount:defaultAccount success:^{
+        completionBlock();
+    } failure:^(NSError * _Nonnull __unused error) {
+        completionBlock();
     }];
 }
 
@@ -396,6 +395,7 @@ static NSInteger HideSearchMinSites = 3;
 {
     self.isSyncing = NO;
     [self.tableView.refreshControl endRefreshing];
+    [self refreshStatsWidgetsSiteList];
 }
 
 - (void)removeBlogItemsFromSpotlight:(Blog *)blog {
@@ -456,19 +456,6 @@ static NSInteger HideSearchMinSites = 3;
     [self showAddSiteAlertFrom:sourceView];
 }
 
-- (BOOL)shouldBypassBlogListViewControllerWhenSelectedFromTabBar
-{
-    return self.dataSource.displayedBlogsCount == 1;
-}
-
-- (void)bypassBlogListViewController
-{
-    if ([self shouldBypassBlogListViewControllerWhenSelectedFromTabBar]) {
-        // We do a delay of 0.0 so that way this doesn't kick off until the next run loop.
-        [self performSelector:@selector(selectFirstSite) withObject:nil afterDelay:0.0];
-    }
-}
-
 - (void)selectFirstSite
 {
     [self tableView:self.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
@@ -492,7 +479,7 @@ static NSInteger HideSearchMinSites = 3;
 
 - (UIStatusBarStyle)preferredStatusBarStyle
 {
-    return UIStatusBarStyleLightContent;
+    return [WPStyleGuide preferredStatusBarStyle];
 }
 
 - (void)configureStackView
@@ -645,47 +632,50 @@ static NSInteger HideSearchMinSites = 3;
     }
 }
 
-- (NSArray *)tableView:(UITableView *)tableView editActionsForRowAtIndexPath:(NSIndexPath *)indexPath
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     Blog *blog = [self.dataSource blogAtIndexPath:indexPath];
     NSMutableArray *actions = [NSMutableArray array];
     __typeof(self) __weak weakSelf = self;
 
     if ([blog supports:BlogFeatureRemovable]) {
-        UITableViewRowAction *removeAction = [UITableViewRowAction rowActionWithStyle:UITableViewRowActionStyleNormal
-                                                                                title:NSLocalizedString(@"Remove", @"Removes a self hosted site from the app")
-                                                                              handler:^(UITableViewRowAction * _Nonnull action, NSIndexPath * _Nonnull indexPath) {
-                                                                                  [ReachabilityUtils onAvailableInternetConnectionDo:^{
-                                                                                      [weakSelf showRemoveSiteAlertForIndexPath:indexPath];
-                                                                                  }];
-                                                                              }];
+        UIContextualAction *removeAction = [UIContextualAction
+                                            contextualActionWithStyle:UIContextualActionStyleNormal title:NSLocalizedString(@"Remove", @"Removes a self hosted site from the app")
+                                            handler:^(UIContextualAction * _Nonnull __unused action, __kindof UIView * _Nonnull __unused sourceView, void (^ _Nonnull __unused completionHandler)(BOOL)) {
+            [ReachabilityUtils onAvailableInternetConnectionDo:^{
+                [weakSelf showRemoveSiteAlertForIndexPath:indexPath];
+            }];
+        }];
+
         removeAction.backgroundColor = [UIColor murielError];
         [actions addObject:removeAction];
     } else {
         if (blog.visible) {
-            UITableViewRowAction *hideAction = [UITableViewRowAction rowActionWithStyle:UITableViewRowActionStyleNormal
-                                                                                  title:NSLocalizedString(@"Hide", @"Hides a site from the site picker list")
-                                                                                handler:^(UITableViewRowAction * _Nonnull action, NSIndexPath * _Nonnull indexPath) {
-                                                                                    [ReachabilityUtils onAvailableInternetConnectionDo:^{
-                                                                                        [weakSelf hideBlogAtIndexPath:indexPath];
-                                                                                    }];
-                                                                                }];
+            UIContextualAction *hideAction = [UIContextualAction
+                                                contextualActionWithStyle:UIContextualActionStyleNormal title:NSLocalizedString(@"Hide", @"Hides a site from the site picker list")
+                                                handler:^(UIContextualAction * _Nonnull __unused action, __kindof UIView * _Nonnull __unused sourceView, void (^ _Nonnull __unused completionHandler)(BOOL)) {
+                [ReachabilityUtils onAvailableInternetConnectionDo:^{
+                    [weakSelf hideBlogAtIndexPath:indexPath];
+                }];
+            }];
+
             hideAction.backgroundColor = [UIColor murielNeutral30];
             [actions addObject:hideAction];
         } else {
-            UITableViewRowAction *unhideAction = [UITableViewRowAction rowActionWithStyle:UITableViewRowActionStyleNormal
-                                                                                    title:NSLocalizedString(@"Unhide", @"Unhides a site from the site picker list")
-                                                                                  handler:^(UITableViewRowAction * _Nonnull action, NSIndexPath * _Nonnull indexPath) {
-                                                                                      [ReachabilityUtils onAvailableInternetConnectionDo:^{
-                                                                                          [weakSelf unhideBlogAtIndexPath:indexPath];
-                                                                                      }];
-                                                                                  }];
+            UIContextualAction *unhideAction = [UIContextualAction
+                                                contextualActionWithStyle:UIContextualActionStyleNormal title:NSLocalizedString(@"Unhide", @"Unhides a site from the site picker list")
+                                                handler:^(UIContextualAction * _Nonnull __unused action, __kindof UIView * _Nonnull __unused sourceView, void (^ _Nonnull __unused completionHandler)(BOOL)) {
+                [ReachabilityUtils onAvailableInternetConnectionDo:^{
+                    [weakSelf unhideBlogAtIndexPath:indexPath];
+                }];
+            }];
+
             unhideAction.backgroundColor = [UIColor murielSuccess];
             [actions addObject:unhideAction];
         }
     }
 
-    return actions;
+    return [UISwipeActionsConfiguration configurationWithActions:actions];
 }
 
 - (void)showRemoveSiteAlertForIndexPath:(NSIndexPath *)indexPath
@@ -703,7 +693,7 @@ static NSInteger HideSearchMinSites = 3;
                                                                       preferredStyle:alertStyle];
 
     [alertController addCancelActionWithTitle:cancelTitle handler:nil];
-    [alertController addDestructiveActionWithTitle:destructiveTitle handler:^(UIAlertAction *action) {
+    [alertController addDestructiveActionWithTitle:destructiveTitle handler:^(UIAlertAction * __unused action) {
         [self confirmRemoveSiteForIndexPath:indexPath];
     }];
     [self presentViewController:alertController animated:YES completion:nil];
@@ -714,9 +704,19 @@ static NSInteger HideSearchMinSites = 3;
 {
     Blog *blog = [self.dataSource blogAtIndexPath:indexPath];
     [self removeBlogItemsFromSpotlight:blog];
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+
+    BlogService *blogService = [[BlogService alloc] initWithCoreDataStack:[ContextManager sharedInstance]];
     [blogService removeBlog:blog];
+
+    if ([Feature enabled:FeatureFlagContentMigration] && [AppConfiguration isWordPress]) {
+        [ContentMigrationCoordinator.shared cleanupExportedDataIfNeeded];
+    }
+    
+    // Delete local data after removing the last site
+    if (!AccountHelper.isLoggedIn) {
+        [AccountHelper deleteAccountData];
+    }
+
     [self.tableView reloadData];
 }
 
@@ -785,25 +785,14 @@ static NSInteger HideSearchMinSites = 3;
 
 - (void)setSelectedBlog:(Blog *)selectedBlog animated:(BOOL)animated
 {
-    if (selectedBlog != _selectedBlog || !_blogDetailsViewController) {
-        _selectedBlog = selectedBlog;
-        self.blogDetailsViewController = [self makeBlogDetailsViewController];
-        self.blogDetailsViewController.blog = selectedBlog;
-
-        if (![self splitViewControllerIsHorizontallyCompact]) {
-            WPSplitViewController *splitViewController = (WPSplitViewController *)self.splitViewController;
-            [self showDetailViewController:[(UIViewController <WPSplitViewControllerDetailProvider> *)self.blogDetailsViewController initialDetailViewControllerForSplitView:splitViewController] sender:self];
-        }
+    if (self.blogSelected != nil) {
+        self.blogSelected(self, selectedBlog);
+    } else {
+        // The site picker without a site-selection callback makes no sense.  We'll dismiss the VC to keep
+        // the app running, but the user won't be able to switch sites.
+        DDLogError(@"There's no site-selection callback assigned to the site picker.");
+        [self dismissViewControllerAnimated:animated completion:nil];
     }
-
-    /// Issue #7284:
-    /// Prevents pushing BlogDetailsViewController, if it was already in the hierarchy.
-    ///
-    if ([self.navigationController.viewControllers containsObject:self.blogDetailsViewController]) {
-        return;
-    }
-
-    [self.navigationController pushViewController:self.blogDetailsViewController animated:animated];
 }
 
 - (CGFloat)tableView:(UITableView *)tableView estimatedHeightForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -816,12 +805,19 @@ static NSInteger HideSearchMinSites = 3;
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText
 {
     self.dataSource.searchQuery = searchText;
+
+    [self debounce:@selector(trackSearchPerformed) afterDelay:0.5f];
 }
 
 - (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar
 {
     self.dataSource.searching = YES;
     [searchBar setShowsCancelButton:YES animated:YES];
+}
+
+- (void)trackSearchPerformed
+{
+    [WPAnalytics trackEvent:WPAnalyticsEventSiteSwitcherSearchPerformed];
 }
 
 - (void)searchBarTextDidEndEditing:(UISearchBar *)searchBar
@@ -872,6 +868,41 @@ static NSInteger HideSearchMinSites = 3;
         [self updateViewsForCurrentSiteCount];
         [self updateSearchVisibility];
     }
+    [WPAnalytics trackEvent:WPAnalyticsEventSiteSwitcherToggleEditTapped properties: @{ @"state": editing ? @"edit" : @"done"}];
+
+}
+
+- (BOOL)shouldShowAddSiteButton
+{
+    return self.dataSource.blogsCount > 0;
+}
+
+- (BOOL)shouldShowEditButton
+{
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    return [Blog wpComBlogCountInContext:context] > 0;
+}
+
+- (void)updateBarButtons
+{
+    BOOL showAddSiteButton = [self shouldShowAddSiteButton];
+    BOOL showEditButton = [self shouldShowEditButton];
+
+    if (!showAddSiteButton) {
+        [self addMeButtonToNavigationBarWithEmail:[[self defaultWordPressComAccount] email] meScenePresenter:self.meScenePresenter];
+        return;
+    }
+
+    if (![AppConfiguration allowSiteCreation]) {
+        self.navigationItem.rightBarButtonItem = self.editButtonItem;
+        return;
+    }
+
+    if (showEditButton) {
+        self.navigationItem.rightBarButtonItems = @[ self.addSiteButton, self.editButtonItem ];
+    } else {
+        self.navigationItem.rightBarButtonItem = self.addSiteButton;
+    }
 }
 
 - (void)toggleAddSiteButton:(BOOL)enabled
@@ -879,60 +910,15 @@ static NSInteger HideSearchMinSites = 3;
     self.addSiteButton.enabled = enabled;
 }
 
-- (void)setAddSiteBarButtonItem
-{
-    if (self.dataSource.allBlogsCount == 0) {
-        if([Feature enabled:FeatureFlagMeMove]) {
-            [self addMeButtonToNavigationBarWith:[[self defaultWordPressComAccount] email]];
-        } else {
-            self.navigationItem.rightBarButtonItem = nil;
-        }
-    }
-    else {
-        self.navigationItem.rightBarButtonItem = self.addSiteButton;
-    }
-}
-
 - (void)addSite
 {
     [self showAddSiteAlertFrom:self.addSiteButton];
 }
 
-- (UIAlertController *)makeAddSiteAlertController
-{
-    UIAlertController *addSiteAlertController = [UIAlertController alertControllerWithTitle:nil
-                                                                                    message:nil
-                                                                             preferredStyle:UIAlertControllerStyleActionSheet];
-
-    if ([self defaultWordPressComAccount]) {
-        UIAlertAction *addNewWordPressAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"Create WordPress.com site", @"Create WordPress.com site button")
-                                                                        style:UIAlertActionStyleDefault
-                                                                      handler:^(UIAlertAction *action) {
-                                                                          [self launchSiteCreation];
-                                                                      }];
-        [addSiteAlertController addAction:addNewWordPressAction];
-    }
-
-    UIAlertAction *addSiteAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"Add self-hosted site", @"Add self-hosted site button")
-                                                            style:UIAlertActionStyleDefault
-                                                          handler:^(UIAlertAction *action) {
-                                                              [self showLoginControllerForAddingSelfHostedSite];
-                                                          }];
-    [addSiteAlertController addAction:addSiteAction];
-
-    UIAlertAction *cancel = [UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", @"Cancel button")
-                                                     style:UIAlertActionStyleCancel
-                                                   handler:nil];
-    [addSiteAlertController addAction:cancel];
-
-    return addSiteAlertController;
-}
-
 - (WPAccount *)defaultWordPressComAccount
 {
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-    return [accountService defaultWordPressComAccount];
+    return [WPAccount lookupDefaultWordPressComAccountInContext:context];
 }
 
 - (void)showLoginControllerForAddingSelfHostedSite
@@ -943,7 +929,7 @@ static NSInteger HideSearchMinSites = 3;
 
 - (void)setVisible:(BOOL)visible forBlog:(Blog *)blog
 {
-    if(!visible && self.dataSource.allBlogsCount > HideAllMinSites) {
+    if(!visible && self.dataSource.blogsCount > HideAllMinSites) {
         if (self.hideCount == 0) {
             self.firstHide = [NSDate date];
         }
@@ -960,26 +946,25 @@ static NSInteger HideSearchMinSites = 3;
             
             UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", @"Cancel")
                                                                    style:UIAlertActionStyleCancel
-                                                                 handler:^(UIAlertAction *action){}];
+                                                                 handler:^(UIAlertAction * __unused action){}];
             
             UIAlertAction *hideAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"Hide All", @"Hide All")
                                                                    style:UIAlertActionStyleDestructive
-                                                                 handler:^(UIAlertAction *action){
-                                                                     NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
-                                                                     [context performBlock:^{
-                                                                         AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-                                                                         WPAccount *account = [accountService defaultWordPressComAccount];
-                                                                         [accountService setVisibility:visible forBlogs:[account.blogs allObjects]];
-                                                                         [[ContextManager sharedInstance] saveContext:context];
-                                                                     }];
-                                                                 }];
+                                                                 handler:^(UIAlertAction * __unused action){
+                AccountService *accountService = [[AccountService alloc] initWithCoreDataStack:[ContextManager sharedInstance]];
+                WPAccount *account = [WPAccount lookupDefaultWordPressComAccountInContext:[[ContextManager sharedInstance] mainContext]];
+                [accountService setVisibility:visible forBlogs:[account.blogs allObjects]];
+            }];
             [alertController addAction:cancelAction];
             [alertController addAction:hideAction];
             [self presentViewController:alertController animated:YES completion:nil];
         }
     }
-    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
+    AccountService *accountService = [[AccountService alloc] initWithCoreDataStack:[ContextManager sharedInstance]];
     [accountService setVisibility:visible forBlogs:@[blog]];
+
+    [WPAnalytics trackEvent:WPAnalyticsEventSiteSwitcherToggleBlogVisible properties:@{ @"visible": @(visible)} blog:blog];
+
 }
 
 #pragma mark - Data Listener
@@ -987,7 +972,7 @@ static NSInteger HideSearchMinSites = 3;
 - (void)dataChanged
 {
     [self.tableView reloadData];
-    [self updateEditButton];
+    [self updateBarButtons];
     [[WordPressAppDelegate shared] trackLogoutIfNeeded];
     [self maybeShowNUX];
     [self updateSearchVisibility];
@@ -1005,21 +990,39 @@ static NSInteger HideSearchMinSites = 3;
 
 - (void)showAddSiteAlertFrom:(id)source
 {
-    if (self.dataSource.allBlogsCount > 0 && self.dataSource.visibleBlogsCount == 0) {
+    if (self.dataSource.blogsCount > 0 && self.dataSource.visibleBlogsCount == 0) {
         [self setEditing:YES animated:YES];
     } else {
-        UIAlertController *addSiteAlertController = [self makeAddSiteAlertController];
+        AddSiteAlertFactory *factory = [AddSiteAlertFactory new];
+        BOOL canCreateWPComSite = [self defaultWordPressComAccount] ? YES : NO;
+        BOOL canAddSelfHostedSite = AppConfiguration.showAddSelfHostedSiteButton;
+
+        // Launch directly into the add site process if we're only going to show one button
+        if(canCreateWPComSite && !canAddSelfHostedSite) {
+            [self launchSiteCreation];
+            return;
+        }
+
+        UIAlertController *alertController = [factory makeAddSiteAlertWithSource:@"my_site" canCreateWPComSite:canCreateWPComSite createWPComSite:^{
+            [self launchSiteCreation];
+        } canAddSelfHostedSite:canAddSelfHostedSite addSelfHostedSite:^{
+            [self showLoginControllerForAddingSelfHostedSite];
+        }];
+
         if ([source isKindOfClass:[UIView class]]) {
             UIView *sourceView = (UIView *)source;
-            addSiteAlertController.popoverPresentationController.sourceView = sourceView;
-            addSiteAlertController.popoverPresentationController.sourceRect = sourceView.bounds;
+            alertController.popoverPresentationController.sourceView = sourceView;
+            alertController.popoverPresentationController.sourceRect = sourceView.bounds;
         } else if ([source isKindOfClass:[UIBarButtonItem class]]) {
-            addSiteAlertController.popoverPresentationController.barButtonItem = source;
+            alertController.popoverPresentationController.barButtonItem = source;
         }
-        addSiteAlertController.popoverPresentationController.permittedArrowDirections = UIPopoverArrowDirectionUp;
+        alertController.popoverPresentationController.permittedArrowDirections = UIPopoverArrowDirectionUp;
 
-        [self presentViewController:addSiteAlertController animated:YES completion:nil];
-        self.addSiteAlertController = addSiteAlertController;
+        [self presentViewController:alertController animated:YES completion:nil];
+        self.addSiteAlertController = alertController;
+
+        [WPAnalytics trackEvent:WPAnalyticsEventSiteSwitcherAddSiteTapped];
+//
     }
 }
 

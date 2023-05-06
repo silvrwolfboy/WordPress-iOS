@@ -1,7 +1,7 @@
 #import "BasePost.h"
 #import "Media.h"
 #import "NSMutableDictionary+Helpers.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 @import WordPressShared;
 
 @implementation BasePost
@@ -22,6 +22,7 @@
 @dynamic pathForDisplayImage;
 
 @synthesize isFeaturedImageChanged;
+@synthesize isFirstTimePublish;
 
 - (NSDate *)dateCreated
 {
@@ -107,7 +108,8 @@
 
 - (BOOL)isContentEmpty
 {
-    return  self.content ? self.content.isEmpty : YES;
+    BOOL isContentAnEmptyGBParagraph = [self.content isEqualToString:@"<!-- wp:paragraph -->\n<p></p>\n<!-- /wp:paragraph -->"];
+    return  self.content ? (self.content.isEmpty || isContentAnEmptyGBParagraph) : YES;
 }
 
 @end

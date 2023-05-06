@@ -1,12 +1,14 @@
 import Foundation
+import XCTest
+import Nimble
 @testable import WordPress
 
 private class TestableEditorSettingsService: EditorSettingsService {
     let mockApi: WordPressComRestApi
 
-    init(managedObjectContext context: NSManagedObjectContext, wpcomApi: WordPressComRestApi) {
+    init(coreDataStack: CoreDataStack, wpcomApi: WordPressComRestApi) {
         mockApi = wpcomApi
-        super.init(managedObjectContext: context)
+        super.init(coreDataStack: coreDataStack)
     }
 
     override func api(for blog: Blog) -> WordPressComRestApi? {
@@ -18,9 +20,7 @@ private class TestableEditorSettingsService: EditorSettingsService {
     }
 }
 
-class EditorSettingsServiceTest: XCTestCase {
-    var contextManager: TestContextManager!
-    var context: NSManagedObjectContext!
+class EditorSettingsServiceTest: CoreDataTestCase {
     var remoteApi: MockWordPressComRestApi!
     var service: EditorSettingsService!
     var database: KeyValueDatabase!
@@ -28,31 +28,25 @@ class EditorSettingsServiceTest: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        contextManager = TestContextManager()
-        context = contextManager.mainContext
         remoteApi = MockWordPressComRestApi()
         database = EphemeralKeyValueDatabase()
-        service = TestableEditorSettingsService(managedObjectContext: context, wpcomApi: remoteApi)
+        service = TestableEditorSettingsService(coreDataStack: contextManager, wpcomApi: remoteApi)
         Environment.replaceEnvironment(contextManager: contextManager)
-        setupDefaultAccount(with: context)
+        setupDefaultAccount(with: mainContext)
     }
 
     func setupDefaultAccount(with context: NSManagedObjectContext) {
         account = ModelTestHelper.insertAccount(context: context)
         account.authToken = "auth"
         account.uuid = "uuid"
-        AccountService(managedObjectContext: context).setDefaultWordPressComAccount(account)
-    }
-
-    override func tearDown() {
-        ContextManager.overrideSharedInstance(nil)
-        super.tearDown()
+        AccountService(coreDataStack: contextManager).setDefaultWordPressComAccount(account)
     }
 
     func testLocalSettingsMigrationPostAztec() {
         let blog = makeTestBlog()
         // Self-Hosted sites will default to Aztec
         blog.account = nil
+        contextManager.saveContextAndWait(mainContext)
 
         sync(with: blog)
 
@@ -65,15 +59,15 @@ class EditorSettingsServiceTest: XCTestCase {
         // Begin migration from local to remote
 
         // Should call POST local settings to remote (migration)
-        XCTAssertTrue(remoteApi.postMethodCalled)
-        XCTAssertTrue(remoteApi.URLStringPassedIn?.contains("platform=mobile&editor=aztec") ?? false)
+        expect(self.remoteApi.postMethodCalled).toEventually(beTrue())
+        XCTAssertTrue(remoteApi.URLStringPassedIn?.contains("platform=mobile&editor=gutenberg") ?? false)
         // Respond with mobile editor set on the server
-        let finalResponse = responseWith(mobileEditor: "aztec")
+        let finalResponse = responseWith(mobileEditor: "gutenberg")
         remoteApi.successBlockPassedIn?(finalResponse, HTTPURLResponse())
 
         waitForExpectations(timeout: 0.1) { (error) in
             // The default value should be now on local and remote
-            XCTAssertEqual(blog.mobileEditor, .aztec)
+            XCTAssertEqual(blog.mobileEditor, .gutenberg)
         }
     }
 
@@ -142,7 +136,7 @@ extension EditorSettingsServiceTest {
     }
 
     func makeTestBlog(withID id: Int = 1) -> Blog {
-        let blog = ModelTestHelper.insertDotComBlog(context: context)
+        let blog = ModelTestHelper.insertDotComBlog(context: mainContext)
         blog.dotComID = NSNumber(value: id)
         blog.account?.authToken = "auth"
         return blog

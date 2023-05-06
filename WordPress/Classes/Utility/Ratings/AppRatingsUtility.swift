@@ -23,6 +23,9 @@ class AppRatingUtility: NSObject {
     /// up to 2 times a year (183 = round(365/2)).
     @objc var numberOfDaysToWaitBetweenPrompts: Int = 183
 
+    /// A value to indicate whether this launch was an upgrade from a previous version
+    var didUpgradeVersion: Bool = false
+
     private let defaults: UserDefaults
     private var sections = [String: Section]()
     private var promptingDisabledRemote = false
@@ -59,6 +62,7 @@ class AppRatingUtility: NSObject {
         if trackingVersion == version {
             incrementUseCount()
         } else {
+            didUpgradeVersion = true
             let shouldSkipRating = shouldSkipRatingForCurrentVersion()
             resetValuesForNewVersion()
             resetReviewPromptDisabledStatus()
@@ -378,7 +382,7 @@ class AppRatingUtility: NSObject {
     }
 
     private enum Constants {
-        static let defaultAppReviewURL = URL(string: "https://itunes.apple.com/app/id335703880?mt=8&action=write-review")!
+        static let defaultAppReviewURL = URL(string: "https://itunes.apple.com/app/id\(AppConstants.itunesAppID)?mt=8&action=write-review")!
         static let promptDisabledURL = URL(string: "https://api.wordpress.org/iphoneapp/app-review-prompt-check/1.0/")!
     }
 }

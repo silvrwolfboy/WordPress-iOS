@@ -13,7 +13,7 @@ fileprivate let fadeAnimationDuration: TimeInterval = 0.1
 // UIKit glitch.
 extension UINavigationController {
     @objc func pushFullscreenViewController(_ viewController: UIViewController, animated: Bool) {
-        guard let splitViewController = splitViewController, splitViewController.preferredDisplayMode != .primaryHidden else {
+        guard let splitViewController = splitViewController, splitViewController.preferredDisplayMode != .secondaryOnly else {
             pushViewController(viewController, animated: animated)
             return
         }
@@ -54,9 +54,9 @@ extension UIView {
 
     /// Hides this view by inserting a snapshot into the view hierarchy.
     ///
-    /// - Parameter afterScreenUpdates: A Boolean value that specifies whether 
-    ///             the snapshot should be taken after recent changes have been 
-    ///             incorporated. Pass the value false to capture the screen in 
+    /// - Parameter afterScreenUpdates: A Boolean value that specifies whether
+    ///             the snapshot should be taken after recent changes have been
+    ///             incorporated. Pass the value false to capture the screen in
     ///             its current state, which might not include recent changes.
     @objc func hideWithBlankingSnapshot(afterScreenUpdates: Bool = false) {
         if subviews.first is BlankingView {
@@ -90,18 +90,14 @@ extension UIView {
 
 extension UINavigationBar {
     @objc func fadeOutNavigationItems(animated: Bool = true) {
-        if let barTintColor = barTintColor {
-            fadeNavigationItems(toColor: barTintColor, animated: animated)
-        }
+        fadeNavigationItems(withTintColor: .appBarBackground, textColor: .appBarBackground, animated: animated)
     }
 
     @objc func fadeInNavigationItemsIfNecessary(animated: Bool = true) {
-        if tintColor != UIColor.white {
-            fadeNavigationItems(toColor: UIColor.white, animated: animated)
-        }
+        fadeNavigationItems(withTintColor: .appBarTint, textColor: .appBarText, animated: animated)
     }
 
-    private func fadeNavigationItems(toColor color: UIColor, animated: Bool) {
+    private func fadeNavigationItems(withTintColor tintColor: UIColor, textColor: UIColor, animated: Bool) {
         if animated {
             // We're using CAAnimation because the various navigation item properties
             // didn't seem to animate using a standard UIView animation block.
@@ -112,8 +108,11 @@ extension UINavigationBar {
             layer.add(fadeAnimation, forKey: "fadeNavigationBar")
         }
 
-        titleTextAttributes = [.foregroundColor: color]
-        tintColor = color
+        self.tintColor = tintColor
+
+        var attributes = titleTextAttributes
+        attributes?[.foregroundColor] = textColor
+        titleTextAttributes = attributes
     }
 }
 

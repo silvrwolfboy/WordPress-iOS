@@ -30,11 +30,14 @@ import Reachability
     @IBOutlet weak var actionButton: UIButton!
     @IBOutlet weak var accessoryView: UIView!
     @IBOutlet weak var accessoryStackView: UIStackView!
+    @IBOutlet weak var labelStackView: UIStackView!
+    @IBOutlet weak var labelButtonStackView: UIStackView!
 
     private(set) var isReachable = false
 
     // To allow storing values until view is loaded.
     private var titleText: String?
+    private var attributedTitleText: NSAttributedString?
     private var subtitleText: String?
     private var attributedSubtitleText: NSAttributedString?
     private var buttonText: String?
@@ -42,6 +45,9 @@ import Reachability
     private var subtitleImageName: String?
     private var accessorySubview: UIView?
     private var hideImage = false
+
+    var labelStackViewSpacing: CGFloat = 10
+    var labelButtonStackViewSpacing: CGFloat = 20
 
     /// Allows caller to customize subtitle attributed text after default styling.
     typealias AttributedSubtitleConfiguration = (_ attributedText: NSAttributedString) -> NSAttributedString?
@@ -92,9 +98,8 @@ import Reachability
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
         setAccessoryViewsVisibility()
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        // `traitCollectionDidChange` is not fired for iOS 16.0 + Media adding flow. The reason why the constraints update call was moved to here.
+        // Since `viewWillTransition` is always called when the orientation changes (portrait | landscape), it will work for all scenarios.
         DispatchQueue.main.async {
             self.configureTitleViewConstraints()
         }
@@ -118,6 +123,7 @@ import Reachability
     ///   - accessoryView:      View to show instead of the image. Optional.
     ///
     @objc class func controllerWith(title: String,
+                                    attributedTitle: NSAttributedString? = nil,
                                     buttonTitle: String? = nil,
                                     subtitle: String? = nil,
                                     attributedSubtitle: NSAttributedString? = nil,
@@ -153,6 +159,7 @@ import Reachability
     ///   - accessoryView:      View to show instead of the image. Optional.
     ///
     @objc func configure(title: String,
+                         attributedTitle: NSAttributedString? = nil,
                          noConnectionTitle: String? = nil,
                          buttonTitle: String? = nil,
                          subtitle: String? = nil,
@@ -168,18 +175,42 @@ import Reachability
             let subtitle = noConnectionSubtitle != nil ? noConnectionSubtitle : NoConnection.subTitle
             subtitleText = subtitle
             attributedSubtitleText = NSAttributedString(string: subtitleText!)
+            configureAttributedSubtitle = nil
+            attributedTitleText = nil
         } else {
             titleText = title
             subtitleText = subtitle
             attributedSubtitleText = attributedSubtitle
+            attributedTitleText = attributedTitle
+            configureAttributedSubtitle = attributedSubtitleConfiguration
         }
 
-        configureAttributedSubtitle = attributedSubtitleConfiguration
         buttonText = buttonTitle
         imageName = !isReachable ? NoConnection.imageName : image
         subtitleImageName = subtitleImage
         accessorySubview = !isReachable ? nil : accessoryView
         displayTitleViewOnly = false
+    }
+
+    /// No results for local data, skips the network status check
+    func configureForLocalData(title: String,
+                               buttonTitle: String? = nil,
+                               subtitle: String? = nil,
+                               attributedSubtitle: NSAttributedString? = nil,
+                               attributedSubtitleConfiguration: AttributedSubtitleConfiguration? = nil,
+                               image: String,
+                               subtitleImage: String? = nil) {
+
+        titleText = title
+        subtitleText = subtitle
+        attributedSubtitleText = attributedSubtitle
+
+        configureAttributedSubtitle = attributedSubtitleConfiguration
+        buttonText = buttonTitle
+        imageName = image
+        subtitleImageName = subtitleImage
+        displayTitleViewOnly = false
+        accessorySubview = nil
     }
 
     /// Public method to show the title specifically formatted for no search results.
@@ -204,7 +235,11 @@ import Reachability
     /// Accepts an optional title, if none is provided, will default to 'Dismiss'
     func showDismissButton(title: String? = nil) {
         navigationItem.hidesBackButton = true
-        let buttonTitle = title ?? NSLocalizedString("Dismiss", comment: "Dismiss button title.")
+        let buttonTitle = title ?? AppLocalizedString(
+            "noResultsViewController.dismissButton",
+            value: "Dismiss",
+            comment: "Dismiss button title."
+        )
 
         let dismissButton = UIBarButtonItem(title: buttonTitle,
                                             style: .done,
@@ -282,13 +317,20 @@ private extension NoResultsViewController {
     // MARK: - View
 
     func configureView() {
-
-        guard let titleText = titleText else {
-            return
-        }
+        labelStackView.spacing = labelStackViewSpacing
+        labelButtonStackView.spacing = labelButtonStackViewSpacing
 
         titleLabel.text = titleText
         titleLabel.textColor = .text
+
+        if let titleText = titleText {
+            titleLabel.attributedText = nil
+            titleLabel.text = titleText
+        }
+
+        if let attributedTitleText = attributedTitleText {
+            titleLabel.attributedText = attributedTitleText
+        }
 
         subtitleTextView.textColor = .textSubtle
 
@@ -370,10 +412,6 @@ private extension NoResultsViewController {
         imageView.isHidden = (hideImage == true) ? true : !accessoryView.isHidden
     }
 
-    func viewIsVisible() -> Bool {
-        return isViewLoaded && view.window != nil
-    }
-
     // MARK: - Configure for Title View Only
 
     func configureForTitleViewOnly() {
@@ -398,18 +436,26 @@ private extension NoResultsViewController {
     }
 
     func copyTitleLabel() -> UILabel? {
-        guard let titleLabel = titleLabel else {
+        // Copy the `titleLabel` to get the style for Title View Only label
+
+        // Note: unarchivedObjectOfClass:fromData:error: sets secure coding to true
+        // We setup our own unarchiver to work around that
+        guard
+            let titleLabel = titleLabel,
+            let data = try? NSKeyedArchiver.archivedData(withRootObject: titleLabel, requiringSecureCoding: false),
+            let unarchiver = try? NSKeyedUnarchiver(forReadingFrom: data)
+        else {
             return nil
         }
-        // Copy the `titleLabel` to get the style for Title View Only label
-        let data = NSKeyedArchiver.archivedData(withRootObject: titleLabel)
-        return NSKeyedUnarchiver.unarchiveObject(with: data) as? UILabel ?? nil
+
+        unarchiver.requiresSecureCoding = false
+
+        return try? unarchiver.decodeTopLevelObject(of: UILabel.self, forKey: "root")
     }
 
     func configureTitleViewConstraints() {
 
-        guard self.viewIsVisible(),
-            displayTitleViewOnly == true else {
+        guard displayTitleViewOnly else {
             return
         }
 
@@ -433,12 +479,13 @@ private extension NoResultsViewController {
                 let titleLabelTopConstraint = titleLabelTopConstraint else {
                     return
             }
-
+            titleLabelTopConstraint.constant = TitleLabelConstraints.topLandscape
             NSLayoutConstraint.activate([titleLabelTopConstraint, titleLabelMaxWidthConstraint, titleLabelCenterXConstraint])
         }
     }
 
     func resetTitleViewConstraints() {
+        titleLabelTopConstraint?.isActive = false
         titleLabelTrailingConstraint?.isActive = false
         titleLabelLeadingConstraint?.isActive = false
         titleLabelMaxWidthConstraint?.isActive = false
@@ -469,6 +516,7 @@ private extension NoResultsViewController {
 
     struct TitleLabelConstraints {
         static let top = CGFloat(64)
+        static let topLandscape = CGFloat(32)
         static let leading = CGFloat(38)
         static let trailing = CGFloat(-38)
         static let maxWidth = CGFloat(360)
@@ -489,7 +537,7 @@ private extension NoResultsViewController {
     // MARK: - Helpers
 
     func accessibilityIdentifier(for string: String) -> String {
-        let buttonIdFormat = NSLocalizedString("%@ Button", comment: "Accessibility identifier for buttons.")
+        let buttonIdFormat = AppLocalizedString("%@ Button", comment: "Accessibility identifier for buttons.")
         return String(format: buttonIdFormat, string)
     }
 
@@ -514,8 +562,8 @@ private extension NoResultsViewController {
     }
 
     struct NoConnection {
-        static let title: String = NSLocalizedString("Unable to load this page right now.", comment: "Title for No results full page screen displayed when there is no connection")
-        static let subTitle: String = NSLocalizedString("Check your network connection and try again.", comment: "Subtitle for No results full page screen displayed when there is no connection")
+        static let title: String = AppLocalizedString("Unable to load this content right now.", comment: "Default title shown for no-results when the device is offline.")
+        static let subTitle: String = AppLocalizedString("Check your network connection and try again.", comment: "Default subtitle for no-results when there is no connection")
         static let imageName = "cloud"
     }
 }
@@ -535,11 +583,11 @@ private extension NoResultsViewController {
             view.accessibilityLabel = titleLabel.text
             view.accessibilityTraits = .staticText
         } else {
-            view.accessibilityElements = [noResultsView!, actionButton!]
+            view.accessibilityElements = [labelStackView!, actionButton!]
 
-            noResultsView.isAccessibilityElement = true
-            noResultsView.accessibilityTraits = .staticText
-            noResultsView.accessibilityLabel = [
+            labelStackView.accessibilityTraits = .staticText
+            labelStackView.isAccessibilityElement = true
+            labelStackView.accessibilityLabel = [
                 titleLabel.text,
                 subtitleTextView.isHidden ? nil : subtitleTextView.attributedText.string
             ].compactMap { $0 }.joined(separator: ". ")

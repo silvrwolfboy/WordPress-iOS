@@ -1,5 +1,5 @@
 #import "BlogSyncFacade.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "BlogService.h"
 #import "AccountService.h"
 #import "Blog.h"
@@ -14,8 +14,7 @@
                     success:(void (^)(void))success
                     failure:(void (^)(NSError *error))failure
 {
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+    BlogService *blogService = [[BlogService alloc] initWithCoreDataStack:[ContextManager sharedInstance]];
     [blogService syncBlogsForAccount:account success:^{
         WP3DTouchShortcutCreator *shortcutCreator = [WP3DTouchShortcutCreator new];
         [shortcutCreator createShortcutsIf3DTouchAvailable:YES];
@@ -32,16 +31,15 @@
                 finishedSync:(void(^)(Blog *))finishedSync
 {
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
 
     NSString *blogName = [options stringForKeyPath:@"blog_title.value"];
     NSString *url = [options stringForKeyPath:@"home_url.value"];
     if (!url) {
         url = [options stringForKeyPath:@"blog_url.value"];
     }
-    Blog *blog = [blogService findBlogWithXmlrpc:xmlrpc andUsername:username];
+    Blog *blog = [Blog lookupWithUsername:username xmlrpc:xmlrpc inContext:context];
     if (!blog) {
-        blog = [blogService createBlogWithAccount:nil];
+        blog = [Blog createBlankBlogInContext:context];
         if (url) {
             blog.url = url;
         }
@@ -70,8 +68,7 @@
             NSString *dotcomUsername = [blog getOptionValue:@"jetpack_user_login"];
             if (dotcomUsername) {
                 // Search for a matching .com account
-                AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-                WPAccount *account = [accountService findAccountWithUsername:dotcomUsername];
+                WPAccount *account = [WPAccount lookupDefaultWordPressComAccountInContext:context];
                 if (account) {
                     blog.account = account;
                     [WPAppAnalytics track:WPAnalyticsStatSignedInToJetpack withBlog:blog];

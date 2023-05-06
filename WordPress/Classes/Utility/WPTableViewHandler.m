@@ -151,6 +151,10 @@ static CGFloat const DefaultCellHeight = 44.0;
         }
         newIndexPath = [self.resultsController indexPathForObject:obj];
 
+        if (i > visibleCellFrames.count) {
+            break;
+        }
+
         CGRect originalCellFrame = [[visibleCellFrames objectAtIndex:i] CGRectValue];
         if (newIndexPath) {
             // Since we still have one of the originally visible objects,
@@ -328,15 +332,6 @@ static CGFloat const DefaultCellHeight = 44.0;
         return [self.delegate tableView:tableView editingStyleForRowAtIndexPath:indexPath];
     }
     return UITableViewCellEditingStyleNone;
-}
-
-- (NSArray *)tableView:(UITableView *)tableView editActionsForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    if ([self.delegate respondsToSelector:@selector(tableView:editActionsForRowAtIndexPath:)]) {
-        return [self.delegate tableView:tableView editActionsForRowAtIndexPath:indexPath];
-    }
-    
-    return nil;
 }
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView leadingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -632,10 +627,12 @@ static CGFloat const DefaultCellHeight = 44.0;
 - (void)controllerDidChangeContent:(NSFetchedResultsController *)controller
 {
     [self.tableView endUpdates];
-    
-    if (self.indexPathSelectedAfterUpdates) {
+
+    // Prevent crashes in iOS 14 if the row is negative
+    // See http://git.io/JIKIB
+    if (self.indexPathSelectedAfterUpdates && self.indexPathSelectedAfterUpdates.row > 0) {
         [self.tableView selectRowAtIndexPath:self.indexPathSelectedAfterUpdates animated:NO scrollPosition:UITableViewScrollPositionNone];
-    } else if (self.indexPathSelectedBeforeUpdates) {
+    } else if (self.indexPathSelectedBeforeUpdates && self.indexPathSelectedBeforeUpdates.row > 0) {
         [self.tableView selectRowAtIndexPath:self.indexPathSelectedBeforeUpdates animated:NO scrollPosition:UITableViewScrollPositionNone];
     }
     
@@ -653,6 +650,18 @@ static CGFloat const DefaultCellHeight = 44.0;
      forChangeType:(NSFetchedResultsChangeType)type
       newIndexPath:(NSIndexPath *)newIndexPath
 {
+    // Prevent crashes in iOS 14 if the row is negative
+    // See http://git.io/JIKIB
+    if (indexPath.row < 0 || newIndexPath.row < 0) {
+        return;
+    }
+
+    // Prevents a crash where index path rows could end with an integer overflow error.
+    // See https://github.com/wordpress-mobile/WordPress-iOS/issues/15366
+    if (indexPath.row == NSUIntegerMax || newIndexPath.row == NSUIntegerMax) {
+        return;
+    }
+
     if (NSFetchedResultsChangeUpdate == type && newIndexPath && ![newIndexPath isEqual:indexPath]) {
         // Seriously, Apple?
         // http://developer.apple.com/library/ios/#releasenotes/iPhone/NSFetchedResultsChangeMoveReportedAsNSFetchedResultsChangeUpdate/_index.html

@@ -11,9 +11,11 @@ class PostCoordinator: NSObject {
 
     @objc static let shared = PostCoordinator()
 
-    private let backgroundContext: NSManagedObjectContext
+    private let coreDataStack: CoreDataStack
 
-    private let mainContext: NSManagedObjectContext
+    private var mainContext: NSManagedObjectContext {
+        coreDataStack.mainContext
+    }
 
     private let queue = DispatchQueue(label: "org.wordpress.postcoordinator")
 
@@ -21,7 +23,6 @@ class PostCoordinator: NSObject {
 
     private let mediaCoordinator: MediaCoordinator
 
-    private let backgroundService: PostService
     private let mainService: PostService
     private let failedPostsFetcher: FailedPostsFetcher
 
@@ -30,21 +31,15 @@ class PostCoordinator: NSObject {
     // MARK: - Initializers
 
     init(mainService: PostService? = nil,
-         backgroundService: PostService? = nil,
          mediaCoordinator: MediaCoordinator? = nil,
          failedPostsFetcher: FailedPostsFetcher? = nil,
-         actionDispatcherFacade: ActionDispatcherFacade = ActionDispatcherFacade()) {
-        let contextManager = ContextManager.sharedInstance()
+         actionDispatcherFacade: ActionDispatcherFacade = ActionDispatcherFacade(),
+         coreDataStack: CoreDataStack = ContextManager.sharedInstance()) {
+        self.coreDataStack = coreDataStack
 
-        let mainContext = contextManager.mainContext
-        let backgroundContext = contextManager.newDerivedContext()
-        backgroundContext.automaticallyMergesChangesFromParent = true
-
-        self.mainContext = mainContext
-        self.backgroundContext = backgroundContext
+        let mainContext = self.coreDataStack.mainContext
 
         self.mainService = mainService ?? PostService(managedObjectContext: mainContext)
-        self.backgroundService = backgroundService ?? PostService(managedObjectContext: backgroundContext)
         self.mediaCoordinator = mediaCoordinator ?? MediaCoordinator.shared
         self.failedPostsFetcher = failedPostsFetcher ?? FailedPostsFetcher(mainContext)
 
@@ -59,6 +54,8 @@ class PostCoordinator: NSObject {
               forceDraftIfCreating: Bool = false,
               defaultFailureNotice: Notice? = nil,
               completion: ((Result<AbstractPost, Error>) -> ())? = nil) {
+
+        notifyNewPostCreated()
 
         prepareToSave(postToSave, automatedRetry: automatedRetry) { result in
             switch result {
@@ -93,6 +90,7 @@ class PostCoordinator: NSObject {
     func publish(_ post: AbstractPost) {
         if post.status == .draft {
             post.status = .publish
+            post.isFirstTimePublish = true
         }
 
         if post.status != .scheduled {
@@ -117,7 +115,7 @@ class PostCoordinator: NSObject {
     /// - Parameter then: a block to perform after post is ready to be saved
     ///
     private func prepareToSave(_ post: AbstractPost, automatedRetry: Bool = false,
-                               then completion: @escaping (Result<AbstractPost, Error>) -> ()) {
+                               then completion: @escaping (Result<AbstractPost, SavingError>) -> ()) {
         post.autoUploadAttemptsCount = NSNumber(value: automatedRetry ? post.autoUploadAttemptsCount.intValue + 1 : 0)
 
         guard mediaCoordinator.uploadMedia(for: post, automatedRetry: automatedRetry) else {
@@ -136,61 +134,22 @@ class PostCoordinator: NSObject {
                 return
             }
 
-            let handleSingleMediaFailure = { [weak self] in
-                guard let `self` = self,
-                    self.isObserving(post: post) else {
-                    return
-                }
-
-                // One of the media attached to the post has already failed. We're changing the
-                // status of the post to .failed so we don't need to observe for other failed media
-                // anymore. If we do, we'll receive more notifications and we'll be calling
-                // completion() multiple times.
-                self.removeObserver(for: post)
-
-                self.change(post: post, status: .failed) { savedPost in
-                    completion(.failure(SavingError.mediaFailure(savedPost)))
+            // Ensure that all synced media references are up to date
+            post.media.forEach { media in
+                if media.remoteStatus == .sync {
+                    self.updateReferences(to: media, in: post)
                 }
             }
 
-            let uuid = mediaCoordinator.addObserver({ [weak self](media, state) in
-                guard let `self` = self else {
-                    return
-                }
-                switch state {
-                case .ended:
-                    let successHandler = {
-                        self.updateReferences(to: media, in: post)
-                        // Let's check if media uploading is still going, if all finished with success then we can upload the post
-                        if !self.mediaCoordinator.isUploadingMedia(for: post) && !post.hasFailedMedia {
-                            self.removeObserver(for: post)
-                            completion(.success(post))
-                        }
-                    }
-                    switch media.mediaType {
-                    case .video:
-                        EditorMediaUtility.fetchRemoteVideoURL(for: media, in: post) { (result) in
-                            switch result {
-                            case .failure:
-                                handleSingleMediaFailure()
-                            case .success(let value):
-                                media.remoteURL = value.videoURL.absoluteString
-                                successHandler()
-                            }
-                        }
-                    default:
-                        successHandler()
-                    }
-                case .failed:
-                    handleSingleMediaFailure()
-                default:
-                    DDLogInfo("Post Coordinator -> Media state: \(state)")
-                }
-            }, forMediaFor: post)
-
+            let uuid = observeMedia(for: post, completion: completion)
             trackObserver(receipt: uuid, for: post)
 
             return
+        } else {
+            // Ensure that all media references are up to date
+            post.media.forEach { media in
+                self.updateReferences(to: media, in: post)
+            }
         }
 
         completion(.success(post))
@@ -204,9 +163,9 @@ class PostCoordinator: NSObject {
         return post.remoteStatus == .pushing
     }
 
-    func posts(for blog: Blog, wichTitleContains value: String) -> NSFetchedResultsController<AbstractPost> {
+    func posts(for blog: Blog, containsTitle title: String, excludingPostIDs excludedPostIDs: [Int] = [], entityName: String? = nil, publishedOnly: Bool = false) -> NSFetchedResultsController<AbstractPost> {
         let context = self.mainContext
-        let fetchRequest = NSFetchRequest<AbstractPost>(entityName: "AbstractPost")
+        let fetchRequest = NSFetchRequest<AbstractPost>(entityName: entityName ?? AbstractPost.entityName())
 
         fetchRequest.sortDescriptors = [NSSortDescriptor(key: "date_created_gmt", ascending: false)]
 
@@ -214,8 +173,14 @@ class PostCoordinator: NSObject {
         let urlPredicate = NSPredicate(format: "permaLink != NULL")
         let noVersionPredicate = NSPredicate(format: "original == NULL")
         var compoundPredicates = [blogPredicate, urlPredicate, noVersionPredicate]
-        if !value.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
-            compoundPredicates.append(NSPredicate(format: "postTitle contains[c] %@", value))
+        if !title.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
+            compoundPredicates.append(NSPredicate(format: "postTitle contains[c] %@", title))
+        }
+        if !excludedPostIDs.isEmpty {
+            compoundPredicates.append(NSPredicate(format: "NOT (postID IN %@)", excludedPostIDs))
+        }
+        if publishedOnly {
+            compoundPredicates.append(NSPredicate(format: "\(BasePost.statusKeyPath) == '\(PostStatusPublish)'"))
         }
         let resultPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: compoundPredicates)
 
@@ -258,7 +223,7 @@ class PostCoordinator: NSObject {
     /// The main cause of wrong status is the app being killed while uploads of posts are happening.
     ///
     @objc func refreshPostStatus() {
-        backgroundService.refreshPostStatus()
+        Post.refreshStatus(with: coreDataStack)
     }
 
     private func upload(post: AbstractPost, forceDraftIfCreating: Bool, completion: ((Result<AbstractPost, Error>) -> ())? = nil) {
@@ -269,6 +234,12 @@ class PostCoordinator: NSObject {
             }
 
             print("Post Coordinator -> upload succesfull: \(String(describing: uploadedPost.content))")
+
+            if uploadedPost.isScheduled() {
+                self?.notifyNewPostScheduled()
+            } else if uploadedPost.isPublished() {
+                self?.notifyNewPostPublished()
+            }
 
             SearchManager.shared.indexItem(uploadedPost)
 
@@ -285,11 +256,80 @@ class PostCoordinator: NSObject {
         })
     }
 
+    func add(assets: [ExportableAsset], to post: AbstractPost) -> [Media?] {
+        let media = assets.map { asset in
+            return mediaCoordinator.addMedia(from: asset, to: post)
+        }
+        return media
+    }
+
+    private func observeMedia(for post: AbstractPost, completion: @escaping (Result<AbstractPost, SavingError>) -> ()) -> UUID {
+        // Only observe if we're not already
+        let handleSingleMediaFailure = { [weak self] in
+            guard let `self` = self,
+                self.isObserving(post: post) else {
+                return
+            }
+
+            // One of the media attached to the post has already failed. We're changing the
+            // status of the post to .failed so we don't need to observe for other failed media
+            // anymore. If we do, we'll receive more notifications and we'll be calling
+            // completion() multiple times.
+            self.removeObserver(for: post)
+
+            self.change(post: post, status: .failed) { savedPost in
+                completion(.failure(SavingError.mediaFailure(savedPost)))
+            }
+        }
+
+        return mediaCoordinator.addObserver({ [weak self](media, state) in
+            guard let `self` = self else {
+                return
+            }
+            switch state {
+            case .ended:
+                let successHandler = {
+                    self.updateReferences(to: media, in: post)
+                    // Let's check if media uploading is still going, if all finished with success then we can upload the post
+                    if !self.mediaCoordinator.isUploadingMedia(for: post) && !post.hasFailedMedia {
+                        self.removeObserver(for: post)
+                        completion(.success(post))
+                    }
+                }
+                switch media.mediaType {
+                case .video:
+                    EditorMediaUtility.fetchRemoteVideoURL(for: media, in: post) { (result) in
+                        switch result {
+                        case .failure:
+                            handleSingleMediaFailure()
+                        case .success(let videoURL):
+                            media.remoteURL = videoURL.absoluteString
+                            successHandler()
+                        }
+                    }
+                default:
+                    successHandler()
+                }
+            case .failed:
+                handleSingleMediaFailure()
+            default:
+                DDLogInfo("Post Coordinator -> Media state: \(state)")
+            }
+        }, forMediaFor: post)
+    }
+
     private func updateReferences(to media: Media, in post: AbstractPost) {
         guard var postContent = post.content,
             let mediaID = media.mediaID?.intValue,
             let remoteURLStr = media.remoteURL else {
             return
+        }
+        var imageURL = remoteURLStr
+
+        if let remoteLargeURL = media.remoteLargeURL {
+            imageURL = remoteLargeURL
+        } else if let remoteMediumURL = media.remoteMediumURL {
+            imageURL = remoteMediumURL
         }
 
         let mediaLink = media.link
@@ -301,26 +341,54 @@ class PostCoordinator: NSObject {
         var gutenbergProcessors = [Processor]()
         var aztecProcessors = [Processor]()
 
+        // File block can upload any kind of media.
+        let gutenbergFileProcessor = GutenbergFileUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: remoteURLStr)
+        gutenbergProcessors.append(gutenbergFileProcessor)
+
         if media.mediaType == .image {
-            let gutenbergImgPostUploadProcessor = GutenbergImgUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: remoteURLStr)
+            let gutenbergImgPostUploadProcessor = GutenbergImgUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: imageURL)
             gutenbergProcessors.append(gutenbergImgPostUploadProcessor)
 
-            let gutenbergGalleryPostUploadProcessor = GutenbergGalleryUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: remoteURLStr, mediaLink: mediaLink)
+            let gutenbergGalleryPostUploadProcessor = GutenbergGalleryUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: imageURL, mediaLink: mediaLink)
             gutenbergProcessors.append(gutenbergGalleryPostUploadProcessor)
 
             let imgPostUploadProcessor = ImgUploadProcessor(mediaUploadID: mediaUploadID, remoteURLString: remoteURLStr, width: media.width?.intValue, height: media.height?.intValue)
             aztecProcessors.append(imgPostUploadProcessor)
+
+            let gutenbergCoverPostUploadProcessor = GutenbergCoverUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: remoteURLStr)
+            gutenbergProcessors.append(gutenbergCoverPostUploadProcessor)
+
+            let gutenbergMediaFilesUploadProcessor = GutenbergMediaFilesUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: remoteURLStr)
+            gutenbergProcessors.append(gutenbergMediaFilesUploadProcessor)
+
         } else if media.mediaType == .video {
             let gutenbergVideoPostUploadProcessor = GutenbergVideoUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: remoteURLStr)
             gutenbergProcessors.append(gutenbergVideoPostUploadProcessor)
 
+            let gutenbergCoverPostUploadProcessor = GutenbergCoverUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: remoteURLStr)
+            gutenbergProcessors.append(gutenbergCoverPostUploadProcessor)
+
             let videoPostUploadProcessor = VideoUploadProcessor(mediaUploadID: mediaUploadID, remoteURLString: remoteURLStr, videoPressID: media.videopressGUID)
             aztecProcessors.append(videoPostUploadProcessor)
+
+            let gutenbergMediaFilesUploadProcessor = GutenbergMediaFilesUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: remoteURLStr)
+            gutenbergProcessors.append(gutenbergMediaFilesUploadProcessor)
+
+            if let videoPressGUID = media.videopressGUID {
+                let gutenbergVideoPressUploadProcessor = GutenbergVideoPressUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, videoPressGUID: videoPressGUID)
+                gutenbergProcessors.append(gutenbergVideoPressUploadProcessor)
+            }
+
+        } else if media.mediaType == .audio {
+            let gutenbergAudioProcessor = GutenbergAudioUploadProcessor(mediaUploadID: gutenbergMediaUploadID, serverMediaID: mediaID, remoteURLString: remoteURLStr)
+            gutenbergProcessors.append(gutenbergAudioProcessor)
         } else if let remoteURL = URL(string: remoteURLStr) {
             let documentTitle = remoteURL.lastPathComponent
             let documentUploadProcessor = DocumentUploadProcessor(mediaUploadID: mediaUploadID, remoteURLString: remoteURLStr, title: documentTitle)
             aztecProcessors.append(documentUploadProcessor)
         }
+
+
 
         // Gutenberg processors need to run first because they are more specific/and target only content inside specific blocks
         postContent = gutenbergProcessors.reduce(postContent) { (content, processor) -> String in
@@ -368,7 +436,7 @@ class PostCoordinator: NSObject {
 
         context.perform {
             if status == .failed {
-                self.mainService.markAsFailedAndDraftIfNeeded(post: post)
+                post.markAsFailedAndDraftIfNeeded()
             } else {
                 post.remoteStatus = status
             }
@@ -442,24 +510,22 @@ extension PostCoordinator: Uploader {
 extension PostCoordinator {
     /// Fetches failed posts that should be retried when there is an internet connection.
     class FailedPostsFetcher {
-        private let postService: PostService
-
-        init(_ postService: PostService) {
-            self.postService = postService
-        }
+        private let managedObjectContext: NSManagedObjectContext
 
         init(_ managedObjectContext: NSManagedObjectContext) {
-            postService = PostService(managedObjectContext: managedObjectContext)
+            self.managedObjectContext = managedObjectContext
         }
 
         func postsAndRetryActions(result: @escaping ([AbstractPost: PostAutoUploadInteractor.AutoUploadAction]) -> Void) {
             let interactor = PostAutoUploadInteractor()
+            managedObjectContext.perform {
+                let request = NSFetchRequest<AbstractPost>(entityName: NSStringFromClass(AbstractPost.self))
+                request.predicate = NSPredicate(format: "remoteStatusNumber == %d", AbstractPostRemoteStatus.failed.rawValue)
+                let posts = (try? self.managedObjectContext.fetch(request)) ?? []
 
-            postService.getFailedPosts { posts in
                 let postsAndActions = posts.reduce(into: [AbstractPost: PostAutoUploadInteractor.AutoUploadAction]()) { result, post in
                     result[post] = interactor.autoUploadAction(for: post)
                 }
-
                 result(postsAndActions)
             }
         }

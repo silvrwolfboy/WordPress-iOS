@@ -40,7 +40,12 @@ import WordPressShared
     let labelTitle = NSLocalizedString("Label", comment: "Noun. Title for the setting to edit the sharing label text.")
     let twitterUsernameTitle = NSLocalizedString("Twitter Username", comment: "Title for the setting to edit the twitter username used when sharing to twitter.")
     let twitterServiceID = "twitter"
-    let managedObjectContext = ContextManager.sharedInstance().newMainContextChildContext()
+
+    /// Core Data Context
+    ///
+    var viewContext: NSManagedObjectContext {
+        ContextManager.sharedInstance().mainContext
+    }
 
     struct SharingCellIdentifiers {
         static let SettingsCellIdentifier = "SettingsTableViewCellIdentifier"
@@ -53,7 +58,7 @@ import WordPressShared
     @objc init(blog: Blog) {
         self.blog = blog
 
-        super.init(style: .grouped)
+        super.init(style: .insetGrouped)
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -65,8 +70,15 @@ import WordPressShared
 
         navigationItem.title = NSLocalizedString("Manage", comment: "Verb. Title of the screen for managing sharing buttons and settings related to sharing.")
 
-        let service = SharingService(managedObjectContext: managedObjectContext)
-        buttons = service.allSharingButtonsForBlog(self.blog)
+        extendedLayoutIncludesOpaqueBars = true
+
+        if isModal() {
+            navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done,
+                                                                target: self,
+                                                                action: #selector(doneButtonTapped))
+        }
+
+        buttons = (try? SharingButton.allSharingButtons(for: blog, in: viewContext)) ?? []
         configureTableView()
         setupSections()
 
@@ -385,13 +397,16 @@ import WordPressShared
         var rows = [SharingButtonsRow]()
 
         let row = SharingSwitchRow()
-        row.configureCell = {[unowned self] (cell: UITableViewCell) in
+        row.configureCell = {[weak self] (cell: UITableViewCell) in
+            guard let self = self else { return }
             if let switchCell = cell as? SwitchTableViewCell {
                 cell.editingAccessoryView = cell.accessoryView
                 cell.editingAccessoryType = cell.accessoryType
                 switchCell.textLabel?.text = NSLocalizedString("Edit sharing buttons", comment: "Title for the edit sharing buttons section")
                 switchCell.on = self.buttonsSection.editing
-                switchCell.onChange = { newValue in
+                switchCell.onChange = { [weak self] newValue in
+                    guard let self = self else { return }
+                    WPAnalytics.track(.sharingButtonsEditSharingButtonsToggled, properties: ["checked": newValue as Any], blog: self.blog)
                     self.buttonsSection.editing = !self.buttonsSection.editing
                     self.updateButtonOrderAfterEditing()
                     self.reloadButtons()
@@ -427,16 +442,19 @@ import WordPressShared
         var rows = [SharingButtonsRow]()
 
         let row = SharingSwitchRow()
-        row.configureCell = {[unowned self] (cell: UITableViewCell) in
+        row.configureCell = {[weak self] (cell: UITableViewCell) in
+            guard let self = self else { return }
             if let switchCell = cell as? SwitchTableViewCell {
                 cell.editingAccessoryView = cell.accessoryView
                 cell.editingAccessoryType = cell.accessoryType
                 switchCell.textLabel?.text = NSLocalizedString("Edit \"More\" button", comment: "Title for the edit more button section")
                 switchCell.on = self.moreSection.editing
-                switchCell.onChange = { newValue in
+                switchCell.onChange = { [weak self] newValue in
+                    guard let self = self else { return }
+                    WPAnalytics.track(.sharingButtonsEditMoreButtonToggled, properties: ["checked": newValue as Any], blog: self.blog)
                     self.updateButtonOrderAfterEditing()
                     self.moreSection.editing = !self.moreSection.editing
-                   self.reloadButtons()
+                    self.reloadButtons()
                 }
             }
         }
@@ -518,8 +536,7 @@ import WordPressShared
             tableView.reloadData()
         }
 
-        let context = ContextManager.sharedInstance().mainContext
-        let service = BlogService(managedObjectContext: context)
+        let service = BlogService(coreDataStack: ContextManager.shared)
         let dotComID = blog.dotComID
         service.updateSettings(
             for: self.blog,
@@ -537,7 +554,7 @@ import WordPressShared
     /// when finished.  Fails silently if there is an error.
     ///
     private func syncSharingButtons() {
-        let service = SharingService(managedObjectContext: managedObjectContext)
+        let service = SharingService(coreDataStack: ContextManager.shared)
         service.syncSharingButtonsForBlog(self.blog,
             success: { [weak self] in
                 self?.reloadButtons()
@@ -551,7 +568,7 @@ import WordPressShared
     /// when finished.  Fails silently if there is an error.
     ///
     private func syncSharingSettings() {
-        let service = BlogService(managedObjectContext: managedObjectContext)
+        let service = BlogService(coreDataStack: ContextManager.shared)
         service.syncSettings(for: blog, success: { [weak self] in
                 self?.reloadSettingsSections()
             },
@@ -613,18 +630,17 @@ import WordPressShared
     ///
     private func saveButtonChanges(_ refreshAfterSync: Bool) {
         let context = ContextManager.sharedInstance().mainContext
-        ContextManager.sharedInstance().save(context) { [weak self] in
+        ContextManager.sharedInstance().save(context, completion: { [weak self] in
             self?.reloadButtons()
             self?.syncButtonChangesToBlog(refreshAfterSync)
-        }
+        }, on: .main)
     }
 
     /// Retrives a fresh copy of the SharingButtons from core data, updating the
     /// `buttons` property and refreshes the button section and the more section.
     ///
     private func reloadButtons() {
-        let service = SharingService(managedObjectContext: managedObjectContext)
-        buttons = service.allSharingButtonsForBlog(blog)
+        buttons = (try? SharingButton.allSharingButtons(for: blog, in: viewContext)) ?? []
 
         refreshButtonsSection()
         refreshMoreSection()
@@ -635,7 +651,7 @@ import WordPressShared
     /// - Parameter refresh: True if the tableview sections should be reloaded.
     ///
     private func syncButtonChangesToBlog(_ refresh: Bool) {
-        let service = SharingService(managedObjectContext: managedObjectContext)
+        let service = SharingService(coreDataStack: ContextManager.shared)
         service.updateSharingButtonsForBlog(blog,
             sharingButtons: buttons,
             success: {[weak self] in
@@ -668,6 +684,10 @@ import WordPressShared
 
     // MARK: - Actions
 
+    @objc private func doneButtonTapped() {
+        dismiss(animated: true)
+    }
+
     /// Called when the user taps the label row. Shows a controller to change the
     /// edit label text.
     ///
@@ -682,6 +702,7 @@ import WordPressShared
             guard value != self.blog.settings!.sharingLabel else {
                 return
             }
+            WPAnalytics.track(.sharingButtonsLabelChanged, properties: [:], blog: blog)
             self.blog.settings!.sharingLabel = value
             self.saveBlogSettingsChanges(true)
         }

@@ -6,7 +6,7 @@ import Nimble
 
 private typealias FailureActionTitles = PostNoticeViewModel.FailureActionTitles
 
-class PostNoticeViewModelTests: XCTestCase {
+class PostNoticeViewModelTests: CoreDataTestCase {
     private struct Scenario {
         let name: String
         let post: AbstractPost
@@ -45,23 +45,12 @@ class PostNoticeViewModelTests: XCTestCase {
         }
     }
 
-    private var contextManager: TestContextManager!
-    private var context: NSManagedObjectContext!
-
     // MARK: - Test Setup
 
     override func setUp() {
         super.setUp()
 
-        contextManager = TestContextManager()
-        context = contextManager.newDerivedContext()
-    }
-
-    override func tearDown() {
-        context = nil
-        contextManager = nil
-
-        super.tearDown()
+        contextManager.useAsSharedInstance(untilTestFinished: self)
     }
 
     // MARK: - Expectations
@@ -229,13 +218,13 @@ class PostNoticeViewModelTests: XCTestCase {
 
     func testFailedPublishedPostsCancelButtonWillCancelAutoUpload() {
         // Given
-        let post = PostBuilder(context)
+        let post = PostBuilder(mainContext)
             .published()
             .with(title: "Dr. Ed Simonis")
             .with(remoteStatus: .failed)
             .confirmedAutoUpload()
             .build()
-        try! context.save()
+        try! mainContext.save()
 
         let postCoordinator = MockPostCoordinator()
         let notice = PostNoticeViewModel(post: post, postCoordinator: postCoordinator).notice
@@ -249,14 +238,13 @@ class PostNoticeViewModelTests: XCTestCase {
 
     func testFailedPublishedUploadedDraftPostsPublishButtonWillMarkForAutoUpload() {
         // Given
-        let context = ContextManager.shared.mainContext
-        let post = PostBuilder(context)
+        let post = PostBuilder(mainContext)
             .drafted()
             .with(title: "I've been drafted!")
             .withRemote()
             .with(remoteStatus: .sync)
             .build()
-        try! context.save()
+        try! mainContext.save()
 
         let postCoordinator = MockPostCoordinator()
         let notice = PostNoticeViewModel(post: post, postCoordinator: postCoordinator).notice
@@ -269,7 +257,7 @@ class PostNoticeViewModelTests: XCTestCase {
     }
 
     private func createPost(_ status: BasePost.Status, hasRemote: Bool = false, autoUploadAttemptsCount: Int = 0) -> Post {
-        var builder = PostBuilder(context)
+        var builder = PostBuilder(mainContext)
             .with(title: UUID().uuidString)
             .with(status: status)
             .with(remoteStatus: .failed)

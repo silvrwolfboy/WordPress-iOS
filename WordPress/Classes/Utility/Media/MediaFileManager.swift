@@ -221,8 +221,7 @@ class MediaFileManager: NSObject {
     /// Removes any local Media files, except any Media matching the predicate.
     ///
     fileprivate func purgeMediaFiles(exceptMedia predicate: NSPredicate, onCompletion: (() -> Void)?, onError: ((Error) -> Void)?) {
-        let context = ContextManager.sharedInstance().newDerivedContext()
-        context.perform {
+        ContextManager.shared.performAndSave({ context in
             let fetch = NSFetchRequest<NSDictionary>(entityName: Media.classNameWithoutNamespaces())
             fetch.predicate = predicate
             fetch.resultType = .dictionaryResultType
@@ -230,34 +229,29 @@ class MediaFileManager: NSObject {
             let localThumbnailURLProperty = #selector(getter: Media.localThumbnailURL).description
             fetch.propertiesToFetch = [localURLProperty,
                                        localThumbnailURLProperty]
-            do {
-                let mediaToKeep = try context.fetch(fetch)
-                var filesToKeep: Set<String> = []
-                for dictionary in mediaToKeep {
-                    if let localPath = dictionary[localURLProperty] as? String,
-                        let localURL = URL(string: localPath) {
-                        filesToKeep.insert(localURL.lastPathComponent)
-                    }
-                    if let localThumbnailPath = dictionary[localThumbnailURLProperty] as? String,
-                        let localThumbnailURL = URL(string: localThumbnailPath) {
-                        filesToKeep.insert(localThumbnailURL.lastPathComponent)
-                    }
+
+            let mediaToKeep = try context.fetch(fetch)
+            var filesToKeep: Set<String> = []
+            for dictionary in mediaToKeep {
+                if let localPath = dictionary[localURLProperty] as? String,
+                    let localURL = URL(string: localPath) {
+                    filesToKeep.insert(localURL.lastPathComponent)
                 }
-                try self.purgeDirectory(exceptFiles: filesToKeep)
-                if let onCompletion = onCompletion {
-                    DispatchQueue.main.async {
-                        onCompletion()
-                    }
-                }
-            } catch {
-                DDLogError("Error while attempting to clean local media: \(error.localizedDescription)")
-                if let onError = onError {
-                    DispatchQueue.main.async {
-                        onError(error)
-                    }
+                if let localThumbnailPath = dictionary[localThumbnailURLProperty] as? String,
+                    let localThumbnailURL = URL(string: localThumbnailPath) {
+                    filesToKeep.insert(localThumbnailURL.lastPathComponent)
                 }
             }
-        }
+            try self.purgeDirectory(exceptFiles: filesToKeep)
+        }, completion: { result in
+            switch result {
+            case .success:
+                onCompletion?()
+            case let .failure(error):
+                DDLogError("Error while attempting to clean local media: \(error.localizedDescription)")
+                onError?(error)
+            }
+        }, on: .main)
     }
 
     /// Removes files in the Media directory, except any files found in the set.

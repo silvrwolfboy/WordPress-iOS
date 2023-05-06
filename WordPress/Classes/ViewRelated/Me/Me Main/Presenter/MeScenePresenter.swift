@@ -6,6 +6,7 @@ import UIKit
 /// in a UISplitViewController/UINavigationController view hierarchy
 @objc
 class MeScenePresenter: NSObject, ScenePresenter {
+
     /// weak reference to the presented scene (no reference retained after it's dismissed)
     private(set) weak var presentedViewController: UIViewController?
 
@@ -37,7 +38,7 @@ private extension MeScenePresenter {
     }
 
     func makeMeViewController() -> MeViewController {
-        return MeViewController()
+        return MeViewController(style: .insetGrouped)
     }
 
     func makeNavigationController() -> UINavigationController {

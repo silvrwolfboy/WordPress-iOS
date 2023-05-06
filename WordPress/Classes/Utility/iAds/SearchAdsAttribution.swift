@@ -33,10 +33,10 @@ import AutomatticTracks
     ///
     private var isTrackingLimited: Bool {
         get {
-            return UserDefaults.standard.bool(forKey: SearchAdsAttribution.userDefaultsLimitedAdTrackingKey)
+            return UserPersistentStoreFactory.instance().bool(forKey: SearchAdsAttribution.userDefaultsLimitedAdTrackingKey)
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: SearchAdsAttribution.userDefaultsLimitedAdTrackingKey)
+            UserPersistentStoreFactory.instance().set(newValue, forKey: SearchAdsAttribution.userDefaultsLimitedAdTrackingKey)
         }
     }
 
@@ -45,10 +45,10 @@ import AutomatticTracks
     ///
     private var isAttributionDetailsSent: Bool {
         get {
-            return UserDefaults.standard.bool(forKey: SearchAdsAttribution.userDefaultsSentKey)
+            return UserPersistentStoreFactory.instance().bool(forKey: SearchAdsAttribution.userDefaultsSentKey)
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: SearchAdsAttribution.userDefaultsSentKey)
+            UserPersistentStoreFactory.instance().set(newValue, forKey: SearchAdsAttribution.userDefaultsSentKey)
         }
     }
 
@@ -123,7 +123,7 @@ import AutomatticTracks
     private func didReceiveError(_ error: Error) {
         let nsError = error as NSError
 
-        guard nsError.code == ADClientError.Code.limitAdTracking.rawValue else {
+        guard nsError.code == ADClientError.Code.trackingRestrictedOrDenied.rawValue else {
             tryAgain(after: 5) // Possible connectivity issues
             return
         }

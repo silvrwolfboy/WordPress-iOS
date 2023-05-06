@@ -56,7 +56,30 @@ private extension NSExceptionName {
 }
 
 extension ContextManager {
-    @objc(handleSaveError:inContext:)
+
+    func internalSave(_ context: NSManagedObjectContext) {
+        guard context.hasChanges else {
+            return
+        }
+
+        let inserted = Array(context.insertedObjects)
+        do {
+            try context.obtainPermanentIDs(for: inserted)
+        } catch {
+            DDLogError("Error obtaining permanent object IDs for \(inserted), \(error)")
+        }
+
+        do {
+            try context.save()
+        } catch {
+            handleSaveError(error as NSError, in: context)
+        }
+    }
+
+}
+
+private extension ContextManager {
+
     func handleSaveError(_ error: NSError, in context: NSManagedObjectContext) {
         let isMainContext = context == mainContext
         let exceptionName: NSExceptionName = isMainContext ? .coreDataSaveMainException : .coreDataSaveDerivedException
@@ -68,9 +91,7 @@ extension ContextManager {
         let exception = NSException(name: exceptionName, reason: reason, userInfo: nil)
         exception.raise()
     }
-}
 
-private extension ContextManager {
     func reasonForError(_ error: NSError) -> String {
         if error.code == NSValidationMultipleErrorsError {
             guard let errors = error.userInfo[NSDetailedErrorsKey] as? [NSError] else {

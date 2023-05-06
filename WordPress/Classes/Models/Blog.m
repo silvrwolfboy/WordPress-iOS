@@ -1,14 +1,14 @@
 #import "Blog.h"
-#import "Comment.h"
 #import "WPAccount.h"
 #import "AccountService.h"
 #import "NSURL+IDN.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "Constants.h"
 #import "WordPress-Swift.h"
-#import "SFHFKeychainUtils.h"
 #import "WPUserAgent.h"
 #import "WordPress-Swift.h"
+
+@class Comment;
 
 static NSInteger const ImageSizeSmallWidth = 240;
 static NSInteger const ImageSizeSmallHeight = 180;
@@ -21,16 +21,19 @@ static NSInteger const JetpackProfessionalMonthlyPlanId = 2001;
 
 NSString * const BlogEntityName = @"Blog";
 NSString * const PostFormatStandard = @"standard";
+NSString * const ActiveModulesKeyStats = @"stats";
 NSString * const ActiveModulesKeyPublicize = @"publicize";
 NSString * const ActiveModulesKeySharingButtons = @"sharedaddy";
 NSString * const OptionsKeyActiveModules = @"active_modules";
 NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled";
 NSString * const OptionsKeyIsAutomatedTransfer = @"is_automated_transfer";
 NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
+NSString * const OptionsKeyIsWPForTeams = @"is_wpforteams_site";
 
 @interface Blog ()
 
 @property (nonatomic, strong, readwrite) WordPressOrgXMLRPCApi *xmlrpcApi;
+@property (nonatomic, strong, readwrite) WordPressOrgRestApi *wordPressOrgRestApi;
 
 @end
 
@@ -41,6 +44,7 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
 @dynamic url;
 @dynamic xmlrpc;
 @dynamic apiKey;
+@dynamic organizationID;
 @dynamic hasOlderPosts;
 @dynamic hasOlderPages;
 @dynamic hasDomainCredit;
@@ -50,8 +54,11 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
 @dynamic comments;
 @dynamic connections;
 @dynamic domains;
+@dynamic inviteLinks;
 @dynamic themes;
 @dynamic media;
+@dynamic userSuggestions;
+@dynamic siteSuggestions;
 @dynamic menus;
 @dynamic menuLocations;
 @dynamic roles;
@@ -79,15 +86,19 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
 @dynamic sharingButtons;
 @dynamic capabilities;
 @dynamic quickStartTours;
+@dynamic quickStartTypeValue;
+@dynamic isBlazeApproved;
 @dynamic userID;
 @dynamic quotaSpaceAllowed;
 @dynamic quotaSpaceUsed;
+@dynamic pageTemplateCategories;
 
 @synthesize isSyncingPosts;
 @synthesize isSyncingPages;
 @synthesize videoPressEnabled;
 @synthesize isSyncingMedia;
 @synthesize xmlrpcApi = _xmlrpcApi;
+@synthesize wordPressOrgRestApi = _wordPressOrgRestApi;
 
 #pragma mark - NSManagedObject subclass methods
 
@@ -95,7 +106,13 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
 {
     [super prepareForDeletion];
 
+    // delete stored password in the keychain for self-hosted sites.
+    if ([self.username length] > 0 && [self.xmlrpc length] > 0) {
+        self.password = nil;
+    }
+
     [_xmlrpcApi invalidateAndCancelTasks];
+    [_wordPressOrgRestApi invalidateAndCancelTasks];
 }
 
 - (void)didTurnIntoFault
@@ -104,16 +121,33 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
 
     // Clean up instance variables
     self.xmlrpcApi = nil;
+    self.wordPressOrgRestApi = nil;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
-
 
 #pragma mark -
 #pragma mark Custom methods
 
+- (NSNumber *)organizationID {
+    NSNumber *organizationID = [self primitiveValueForKey:@"organizationID"];
+    
+    if (organizationID == nil) {
+        return @0;
+    } else {
+        return organizationID;
+    }
+}
+
 - (BOOL)isAtomic
 {
-    return [self.options[OptionsKeyIsAtomic] boolValue];
+    NSNumber *value = (NSNumber *)[self getOptionValue:OptionsKeyIsAtomic];
+    return [value boolValue];
+}
+
+- (BOOL)isWPForTeams
+{
+    NSNumber *value = (NSNumber *)[self getOptionValue:OptionsKeyIsWPForTeams];
+    return [value boolValue];
 }
 
 - (BOOL)isAutomatedTransfer
@@ -122,27 +156,14 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
     return [value boolValue];
 }
 
-- (NSString *)icon
-{
-    [self willAccessValueForKey:@"icon"];
-    NSString *icon = [self primitiveValueForKey:@"icon"];
-    [self didAccessValueForKey:@"icon"];
-
-    if (icon) {
-        return icon;
-    }
-
-    // if the icon is not set we can use the host url to construct it
-    NSString *hostUrl = [[NSURL URLWithString:self.xmlrpc] host];
-    if (hostUrl == nil) {
-        hostUrl = self.xmlrpc;
-    }
-    return hostUrl;
-}
-
 // Used as a key to store passwords, if you change the algorithm, logins will break
 - (NSString *)displayURL
 {
+    if (self.url == nil) {
+        DDLogInfo(@"Blog display URL is nil");
+        return nil;
+    }
+    
     NSError *error = nil;
     NSRegularExpression *protocol = [NSRegularExpression regularExpressionWithPattern:@"http(s?)://" options:NSRegularExpressionCaseInsensitive error:&error];
     NSString *result = [NSString stringWithFormat:@"%@", [protocol stringByReplacingMatchesInString:self.url options:0 range:NSMakeRange(0, [self.url length]) withTemplate:@""]];
@@ -206,6 +227,11 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
 
 - (NSString *)urlWithPath:(NSString *)path
 {
+    if (!path || !self.xmlrpc) {
+        DDLogError(@"Blog: Error creating urlWithPath.");
+        return nil;
+    }
+
     NSError *error = nil;
     NSRegularExpression *xmlrpc = [NSRegularExpression regularExpressionWithPattern:@"xmlrpc.php$" options:NSRegularExpressionCaseInsensitive error:&error];
     return [xmlrpc stringByReplacingMatchesInString:self.xmlrpc options:0 range:NSMakeRange(0, [self.xmlrpc length]) withTemplate:path];
@@ -223,26 +249,6 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
     return [NSString stringWithFormat:@"%@%@", adminBaseUrl, path];
 }
 
-- (NSUInteger)numberOfPendingComments
-{
-    NSUInteger pendingComments = 0;
-    if ([self hasFaultForRelationshipNamed:@"comments"]) {
-        NSFetchRequest *request = [NSFetchRequest fetchRequestWithEntityName:@"Comment"];
-        [request setPredicate:[NSPredicate predicateWithFormat:@"blog = %@ AND status like 'hold'", self]];
-        [request setIncludesSubentities:NO];
-        NSError *error;
-        pendingComments = [self.managedObjectContext countForFetchRequest:request error:&error];
-    } else {
-        for (Comment *element in self.comments) {
-            if ( [CommentStatusPending isEqualToString:element.status] ) {
-                pendingComments++;
-            }
-        }
-    }
-
-    return pendingComments;
-}
-
 - (NSArray *)sortedCategories
 {
     NSSortDescriptor *sortNameDescriptor = [[NSSortDescriptor alloc] initWithKey:@"categoryName"
@@ -258,16 +264,18 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
     if ([self.postFormats count] == 0) {
         return @[];
     }
+
     NSMutableArray *sortedFormats = [NSMutableArray arrayWithCapacity:[self.postFormats count]];
- 
+
     if (self.postFormats[PostFormatStandard]) {
         [sortedFormats addObject:PostFormatStandard];
     }
-    [self.postFormats enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
-        if (![key isEqual:PostFormatStandard]) {
-            [sortedFormats addObject:key];
-        }
+
+    NSArray *sortedNonStandardFormats = [[self.postFormats keysSortedByValueUsingSelector:@selector(localizedCaseInsensitiveCompare:)] wp_filter:^BOOL(id obj) {
+        return ![obj isEqual:PostFormatStandard];
     }];
+
+    [sortedFormats addObjectsFromArray:sortedNonStandardFormats];
 
     return [NSArray arrayWithArray:sortedFormats];
 }
@@ -301,11 +309,52 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
     return [self postFormatTextFromSlug:self.settings.defaultPostFormat];
 }
 
+- (BOOL)hasMappedDomain {
+    if (![self isHostedAtWPcom]) {
+        return NO;
+    }
+
+    NSURL *unmappedURL = [NSURL URLWithString:[self getOptionValue:@"unmapped_url"]];
+    NSURL *homeURL = [NSURL URLWithString:[self homeURL]];
+
+    return ![[unmappedURL host] isEqualToString:[homeURL host]];
+}
+
 - (BOOL)hasIcon
 {
     // A blog without an icon has the blog url in icon, so we can't directly check its
     // length to determine if we have an icon or not
     return self.icon.length > 0 ? [NSURL URLWithString:self.icon].pathComponents.count > 1 : NO;
+}
+
+- (NSTimeZone *)timeZone
+{
+    CGFloat const OneHourInSeconds = 60.0 * 60.0;
+
+    NSString *timeZoneName = [self getOptionValue:@"timezone"];
+    NSNumber *gmtOffSet = [self getOptionValue:@"gmt_offset"];
+    id optionValue = [self getOptionValue:@"time_zone"];
+
+    NSTimeZone *timeZone = nil;
+    if (timeZoneName.length > 0) {
+        timeZone = [NSTimeZone timeZoneWithName:timeZoneName];
+    }
+
+    if (!timeZone && gmtOffSet != nil) {
+        timeZone = [NSTimeZone timeZoneForSecondsFromGMT:(gmtOffSet.floatValue * OneHourInSeconds)];
+    }
+
+    if (!timeZone && optionValue != nil) {
+        NSInteger timeZoneOffsetSeconds = [optionValue floatValue] * OneHourInSeconds;
+        timeZone = [NSTimeZone timeZoneForSecondsFromGMT:timeZoneOffsetSeconds];
+    }
+
+    if (!timeZone) {
+        timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+    }
+
+    return timeZone;
+
 }
 
 - (NSString *)postFormatTextFromSlug:(NSString *)postFormatSlug
@@ -322,10 +371,18 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
     return formatText;
 }
 
-// WP.COM private blog.
+/// Call this method to know whether the blog is private.
+///
 - (BOOL)isPrivate
 {
-    return (self.isHostedAtWPcom && [self.settings.privacy isEqualToNumber:@(SiteVisibilityPrivate)]);
+    return [self.settings.privacy isEqualToNumber:@(SiteVisibilityPrivate)];
+}
+
+/// Call this method to know whether the blog is private AND hosted at WP.com.
+///
+- (BOOL)isPrivateAtWPCom
+{
+    return (self.isHostedAtWPcom && [self isPrivate]);
 }
 
 - (SiteVisibility)siteVisibility
@@ -395,12 +452,26 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
 
 - (NSString *)version
 {
-    return [self getOptionValue:@"software_version"];
+    // Ensure the value being returned is a string to prevent a crash when using this value in Swift
+    id value = [self getOptionValue:@"software_version"];
+
+    // If its a string, then return its value 🎉
+    if([value isKindOfClass:NSString.class]) {
+        return value;
+    }
+
+    // If its not a string, but can become a string, then convert it
+    if([value respondsToSelector:@selector(stringValue)]) {
+        return [value stringValue];
+    }
+
+    // If the value is an unknown type, and can not become a string, then default to a blank string.
+    return @"";
 }
 
 - (NSString *)password
 {
-    return [SFHFKeychainUtils getPasswordForUsername:self.username andServiceName:self.xmlrpc error:nil];
+    return [SFHFKeychainUtils getPasswordForUsername:self.username andServiceName:self.xmlrpc accessGroup:nil error:nil];
 }
 
 - (void)setPassword:(NSString *)password
@@ -411,11 +482,13 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
         [SFHFKeychainUtils storeUsername:self.username
                              andPassword:password
                           forServiceName:self.xmlrpc
+                             accessGroup:nil
                           updateExisting:YES
                                    error:nil];
     } else {
         [SFHFKeychainUtils deleteItemForUsername:self.username
                                   andServiceName:self.xmlrpc
+                                     accessGroup:nil
                                            error:nil];
     }
 }
@@ -429,7 +502,7 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
 {
     if (self.username) {
         return self.username;
-    } else if (self.account && self.isHostedAtWPcom) {
+    } else if (self.account && self.isAccessibleThroughWPCom) {
         return self.account.username;
     } else {
         // FIXME: Figure out how to get the self hosted username when using Jetpack REST (@koke 2015-06-15)
@@ -462,15 +535,21 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
             return [self supportsRestApi] && self.isListingUsersAllowed;
         case BlogFeatureWPComRESTAPI:
         case BlogFeatureCommentLikes:
-        case BlogFeatureStats:
-        case BlogFeatureStockPhotos:
             return [self supportsRestApi];
+        case BlogFeatureStats:
+            return [self supportsRestApi] && [self isViewingStatsAllowed];
+        case BlogFeatureStockPhotos:
+            return [self supportsRestApi] && [JetpackFeaturesRemovalCoordinator jetpackFeaturesEnabled];
+        case BlogFeatureTenor:
+            return [JetpackFeaturesRemovalCoordinator jetpackFeaturesEnabled];
         case BlogFeatureSharing:
             return [self supportsSharing];
         case BlogFeatureOAuth2Login:
             return [self isHostedAtWPcom];
         case BlogFeatureMentions:
-            return [self isHostedAtWPcom];
+            return [self isAccessibleThroughWPCom];
+        case BlogFeatureXposts:
+            return [self isAccessibleThroughWPCom];
         case BlogFeatureReblog:
         case BlogFeaturePlans:
             return [self isHostedAtWPcom] && [self isAdmin];
@@ -479,7 +558,7 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
         case BlogFeatureJetpackImageSettings:
             return [self supportsJetpackImageSettings];
         case BlogFeatureJetpackSettings:
-            return [self supportsRestApi] && ![self isHostedAtWPcom] && [self isAdmin];
+            return [self supportsJetpackSettings];
         case BlogFeaturePushNotifications:
             return [self supportsPushNotifications];
         case BlogFeatureThemeBrowsing:
@@ -501,13 +580,41 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
         case BlogFeatureSiteManagement:
             return [self supportsSiteManagementServices];
         case BlogFeatureDomains:
-            return [self isHostedAtWPcom] && [self supportsSiteManagementServices];
+            return ([self isHostedAtWPcom] || [self isAtomic]) && [self isAdmin] && ![self isWPForTeams];
         case BlogFeatureNoncePreviews:
             return [self supportsRestApi] && ![self isHostedAtWPcom];
         case BlogFeatureMediaMetadataEditing:
             return [self supportsRestApi] && [self isAdmin];
         case BlogFeatureMediaDeletion:
             return [self isAdmin];
+        case BlogFeatureHomepageSettings:
+            return [self supportsRestApi] && [self isAdmin];
+        case BlogFeatureStories:
+            return [self supportsStories];
+        case BlogFeatureContactInfo:
+            return [self supportsContactInfo];
+        case BlogFeatureBlockEditorSettings:
+            return [self supportsBlockEditorSettings];
+        case BlogFeatureLayoutGrid:
+            return [self supportsLayoutGrid];
+        case BlogFeatureTiledGallery:
+            return [self supportsTiledGallery];
+        case BlogFeatureVideoPress:
+            return [self supportsVideoPress];
+        case BlogFeatureFacebookEmbed:
+            return [self supportsEmbedVariation: @"9.0"];
+        case BlogFeatureInstagramEmbed:
+            return [self supportsEmbedVariation: @"9.0"];
+        case BlogFeatureLoomEmbed:
+            return [self supportsEmbedVariation: @"9.0"];
+        case BlogFeatureSmartframeEmbed:
+            return [self supportsEmbedVariation: @"10.2"];
+        case BlogFeatureFileDownloadsStats:
+            return [self isHostedAtWPcom];
+        case BlogFeatureBlaze:
+            return [self isBlazeApproved];
+        case BlogFeaturePages:
+            return [self isListingPagesAllowed];
     }
 }
 
@@ -554,6 +661,11 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
     }
 }
 
+- (BOOL)isStatsActive
+{
+    return [self jetpackStatsModuleEnabled] || [self isHostedAtWPcom];
+}
+
 - (BOOL)supportsPushNotifications
 {
     return [self accountIsDefaultAccount];
@@ -569,17 +681,67 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
     BOOL hasRequiredJetpack = [self hasRequiredJetpackVersion:@"5.6"];
 
     BOOL isTransferrable = self.isHostedAtWPcom
-        && self.hasBusinessPlan
-        && self.siteVisibility != SiteVisibilityPrivate
-        && self.isAdmin;
+    && self.hasBusinessPlan
+    && self.siteVisibility != SiteVisibilityPrivate
+    && self.isAdmin;
 
-    return isTransferrable || hasRequiredJetpack;
+    BOOL supports = isTransferrable || hasRequiredJetpack;
+
+    // If the site is not hosted on WP.com we can still manage plugins directly using the WP.org rest API
+    // Reference: https://make.wordpress.org/core/2020/07/16/new-and-modified-rest-api-endpoints-in-wordpress-5-5/
+    if(!supports && !self.account){
+        supports = !self.isHostedAtWPcom
+        && self.wordPressOrgRestApi
+        && [self hasRequiredWordPressVersion:@"5.5"]
+        && self.isAdmin;
+    }
+
+    return supports;
+}
+
+- (BOOL)supportsStories
+{
+    BOOL hasRequiredJetpack = [self hasRequiredJetpackVersion:@"9.1"];
+    // Stories are disabled in iPad until this Kanvas issue is solved: https://github.com/tumblr/kanvas-ios/issues/104
+    return (hasRequiredJetpack || self.isHostedAtWPcom) && ![UIDevice isPad] && [JetpackFeaturesRemovalCoordinator jetpackFeaturesEnabled];
+}
+
+- (BOOL)supportsContactInfo
+{
+    return [self hasRequiredJetpackVersion:@"8.5"] || self.isHostedAtWPcom;
+}
+
+- (BOOL)supportsLayoutGrid
+{
+    return self.isHostedAtWPcom || self.isAtomic;
+}
+
+- (BOOL)supportsTiledGallery
+{
+    return self.isHostedAtWPcom;
+}
+
+- (BOOL)supportsVideoPress
+{
+    return self.isHostedAtWPcom;
+}
+
+- (BOOL)supportsEmbedVariation:(NSString *)requiredJetpackVersion
+{
+    return [self hasRequiredJetpackVersion:requiredJetpackVersion] || self.isHostedAtWPcom;
+}
+
+- (BOOL)supportsJetpackSettings
+{
+    return [JetpackFeaturesRemovalCoordinator jetpackFeaturesEnabled]
+    && [self supportsRestApi]
+    && ![self isHostedAtWPcom]
+    && [self isAdmin];
 }
 
 - (BOOL)accountIsDefaultAccount
 {
-    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:self.managedObjectContext];
-    return [accountService isDefaultWordPressComAccount:self.account];
+    return [[self account] isDefaultWordPressComAccount];
 }
 
 - (NSNumber *)dotComID
@@ -717,6 +879,14 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
     return _xmlrpcApi;
 }
 
+- (WordPressOrgRestApi *)wordPressOrgRestApi
+{
+    if (_wordPressOrgRestApi == nil) {
+        _wordPressOrgRestApi = [[WordPressOrgRestApi alloc] initWithBlog:self];
+    }
+    return _wordPressOrgRestApi;
+}
+
 - (WordPressComRestApi *)wordPressComRestApi
 {
     if (self.account) {
@@ -741,6 +911,11 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
 {
     NSArray *activeModules = (NSArray *)[self getOptionValue:OptionsKeyActiveModules];
     return [activeModules containsObject:moduleName] ?: NO;
+}
+
+- (BOOL)jetpackStatsModuleEnabled
+{
+    return [self jetpackActiveModule:ActiveModulesKeyStats];
 }
 
 - (BOOL)jetpackPublicizeModuleEnabled
@@ -775,6 +950,13 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
     && [self.jetpack.version compare:requiredJetpackVersion options:NSNumericSearch] != NSOrderedAscending;
 }
 
+/// Checks the blogs installed WordPress version is more than or equal to the requiredVersion
+/// @param requiredVersion The minimum version to check for
+- (BOOL)hasRequiredWordPressVersion:(NSString *)requiredVersion
+{
+    return [self.version compare:requiredVersion options:NSNumericSearch] != NSOrderedAscending;
+}
+
 #pragma mark - Private Methods
 
 - (id)getOptionValue:(NSString *)name
@@ -788,6 +970,22 @@ NSString * const OptionsKeyIsAtomic = @"is_wpcom_atomic";
         optionValue = currentOption[@"value"];
     }];
     return optionValue;
+}
+
+- (void)setValue:(id)value forOption:(NSString *)name
+{
+    [self.managedObjectContext performBlockAndWait:^{
+        if ( self.options == nil || (self.options.count == 0) ) {
+            return;
+        }
+
+        NSMutableDictionary *mutableOptions = [self.options mutableCopy];
+
+        NSDictionary *valueDict = @{ @"value": value };
+        mutableOptions[name] = valueDict;
+
+        self.options = [NSDictionary dictionaryWithDictionary:mutableOptions];
+    }];
 }
 
 @end

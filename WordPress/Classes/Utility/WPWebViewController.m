@@ -71,7 +71,6 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
         _optionsButton = configuration.optionsButton;
         _secureInteraction = configuration.secureInteraction;
         _addsWPComReferrer = configuration.addsWPComReferrer;
-        _addsHideMasterbarParameters = configuration.addsHideMasterbarParameters;
         _customTitle = configuration.customTitle;
         _authenticator = configuration.authenticator;
     }
@@ -95,24 +94,24 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
 
     // Buttons
     if (!self.optionsButton) {
-        self.optionsButton = [[UIBarButtonItem alloc] initWithImage:[Gridicon iconOfType:GridiconTypeShareIOS] style:UIBarButtonItemStylePlain target:self action:@selector(showLinkOptions)];
+        self.optionsButton = [[UIBarButtonItem alloc] initWithImage:[UIImage gridiconOfType:GridiconTypeShareiOS] style:UIBarButtonItemStylePlain target:self action:@selector(showLinkOptions)];
 
         self.optionsButton.accessibilityLabel   = NSLocalizedString(@"Share",   @"Spoken accessibility label");
     }
 
-    self.dismissButton = [[UIBarButtonItem alloc] initWithImage:[Gridicon iconOfType:GridiconTypeCross] style:UIBarButtonItemStylePlain target:self action:@selector(dismiss)];
+    self.dismissButton = [[UIBarButtonItem alloc] initWithImage:[UIImage gridiconOfType:GridiconTypeCross] style:UIBarButtonItemStylePlain target:self action:@selector(dismiss)];
 
     self.dismissButton.accessibilityLabel   = NSLocalizedString(@"Dismiss", @"Dismiss a view. Verb");
     self.backButton.accessibilityLabel      = NSLocalizedString(@"Back",    @"Previous web page");
     self.forwardButton.accessibilityLabel   = NSLocalizedString(@"Forward", @"Next web page");
 
-    self.backButton.image                   = [[Gridicon iconOfType:GridiconTypeChevronLeft] imageFlippedForRightToLeftLayoutDirection];
-    self.forwardButton.image                = [[Gridicon iconOfType:GridiconTypeChevronRight] imageFlippedForRightToLeftLayoutDirection];
+    self.backButton.image                   = [[UIImage gridiconOfType:GridiconTypeChevronLeft] imageFlippedForRightToLeftLayoutDirection];
+    self.forwardButton.image                = [[UIImage gridiconOfType:GridiconTypeChevronRight] imageFlippedForRightToLeftLayoutDirection];
 
     // Toolbar: Hidden by default!
-    self.toolbar.barTintColor               = [UIColor whiteColor];
-    self.backButton.tintColor               = [UIColor murielNeutral20];
-    self.forwardButton.tintColor            = [UIColor murielNeutral20];
+    self.toolbar.barTintColor               = [[UIColor alloc] initWithLight:[UIColor whiteColor] dark:[UIColor murielAppBarBackground]];
+    self.backButton.tintColor               = [UIColor murielListIcon];
+    self.forwardButton.tintColor            = [UIColor murielListIcon];
     self.toolbarBottomConstraint.constant   = WPWebViewToolbarHiddenConstant;
 
     // Share
@@ -122,14 +121,13 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
     
     // Additional Setup
     [self setupWebView];
-    [self setupAuthenticator];
 
     // Fire away!
     [self applyModalStyleIfNeeded];
     [self loadWebViewRequest];
 
     if (UIAccessibilityIsBoldTextEnabled()) {
-        self.navigationController.navigationBar.tintColor = [UIColor murielNeutral20];
+        self.navigationController.navigationBar.tintColor = [UIColor murielListIcon];
     }
 }
 
@@ -147,19 +145,8 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
         return;
     }
 
-    UIImage *navBackgroundImage             = [UIImage imageWithColor:[WPStyleGuide webViewModalNavigationBarBackground]];
-    UIImage *navShadowImage                 = [UIImage imageWithColor:[WPStyleGuide webViewModalNavigationBarShadow]];
-
-    UINavigationBar *navigationBar          = self.navigationController.navigationBar;
-    navigationBar.shadowImage               = navShadowImage;
-    navigationBar.barStyle                  = UIBarStyleDefault;
-    [navigationBar setBackgroundImage:navBackgroundImage forBarMetrics:UIBarMetricsDefault];
-
-    self.titleView.titleLabel.textColor     = [UIColor whiteColor];
-    self.titleView.subtitleLabel.textColor  = [UIColor whiteColor];
-
-    self.dismissButton.tintColor            = [UIColor whiteColor];
-    self.optionsButton.tintColor            = [UIColor whiteColor];
+    self.titleView.titleLabel.textColor     = [UIColor murielText];
+    self.titleView.subtitleLabel.textColor  = [UIColor murielNeutral30];
 
     self.navigationItem.leftBarButtonItem   = self.dismissButton;
 }
@@ -175,14 +162,6 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
 }
 
 #pragma mark - Setup
-
-/// I'm not sure why this is necessary, but it seems like the authenticator is failing to redirect us if
-/// this isn't set to true.  @kokejb suggested this change and it's working for now.
-///
-- (void)setupAuthenticator
-{
-    self.authenticator.safeRedirect = true;
-}
 
 - (void)setupTitle
 {
@@ -257,11 +236,6 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
     NSMutableURLRequest *mutableRequest = [request isKindOfClass:[NSMutableURLRequest class]] ? (NSMutableURLRequest *)request : [request mutableCopy];
     if (self.addsWPComReferrer) {
         [mutableRequest setValue:WPComReferrerURL forHTTPHeaderField:@"Referer"];
-    }
-
-    if (self.addsHideMasterbarParameters &&
-        ([mutableRequest.URL.host containsString:WPComDomain] || [mutableRequest.URL.host containsString:AutomatticDomain])) {
-        mutableRequest.URL = [mutableRequest.URL appendingHideMasterbarParameters];
     }
 
     [mutableRequest setValue:[WPUserAgent wordPressUserAgent] forHTTPHeaderField:@"User-Agent"];
@@ -386,7 +360,7 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
     [activityItems addObject:[NSURL URLWithString:permaLink]];
 
     UIActivityViewController *activityViewController = [[UIActivityViewController alloc] initWithActivityItems:activityItems applicationActivities:[WPActivityDefaults defaultActivities]];
-    activityViewController.completionWithItemsHandler = ^(NSString *activityType, BOOL completed, NSArray *returnedItems, NSError *activityError) {
+    activityViewController.completionWithItemsHandler = ^(NSString *activityType, BOOL completed, NSArray * __unused returnedItems, NSError * __unused  activityError) {
         if (!completed) {
             return;
         }
@@ -408,15 +382,6 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
     NSURLRequest *request = [navigationAction request];
     
     DDLogInfo(@"%@ Should Start Loading [%@]", NSStringFromClass([self class]), request.URL.absoluteString);
-    
-    NSURLRequest *redirectRequest = [self.authenticator interceptRedirectWithRequest:request];
-    if (redirectRequest != NULL) {
-        DDLogInfo(@"Found redirect to %@", redirectRequest);
-        [self.webView loadRequest:redirectRequest];
-        
-        decisionHandler(WKNavigationActionPolicyCancel);
-        return;
-    }
     
     // To handle WhatsApp and Telegraph shares
     // Even though the documentation says that canOpenURL will only return YES for

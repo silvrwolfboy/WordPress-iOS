@@ -1,7 +1,12 @@
+import AutomatticTracks
 import Foundation
 import WordPressShared
 import Gridicons
 
+protocol ReaderTopicsChipsDelegate: AnyObject {
+    func didSelect(topic: String)
+    func heightDidChange()
+}
 
 @objc public protocol ReaderPostCellDelegate: NSObjectProtocol {
     func readerCell(_ cell: ReaderPostCardCell, headerActionForProvider provider: ReaderPostContentProvider)
@@ -9,7 +14,6 @@ import Gridicons
     func readerCell(_ cell: ReaderPostCardCell, followActionForProvider provider: ReaderPostContentProvider)
     func readerCell(_ cell: ReaderPostCardCell, saveActionForProvider provider: ReaderPostContentProvider)
     func readerCell(_ cell: ReaderPostCardCell, shareActionForProvider provider: ReaderPostContentProvider, fromView sender: UIView)
-    func readerCell(_ cell: ReaderPostCardCell, visitActionForProvider provider: ReaderPostContentProvider)
     func readerCell(_ cell: ReaderPostCardCell, likeActionForProvider provider: ReaderPostContentProvider)
     func readerCell(_ cell: ReaderPostCardCell, menuActionForProvider provider: ReaderPostContentProvider, fromView sender: UIView)
     func readerCell(_ cell: ReaderPostCardCell, attributionActionForProvider provider: ReaderPostContentProvider)
@@ -18,76 +22,87 @@ import Gridicons
 }
 
 @objc open class ReaderPostCardCell: UITableViewCell {
+
     // MARK: - Properties
 
     // Wrapper views
-    @IBOutlet fileprivate weak var contentStackView: UIStackView!
+    @IBOutlet private weak var contentStackView: UIStackView!
+    @IBOutlet private weak var topicsCollectionView: TopicsCollectionView!
 
-    // Header realated Views
-    @IBOutlet fileprivate weak var avatarImageView: UIImageView!
-    @IBOutlet fileprivate weak var headerBlogButton: UIButton!
-    @IBOutlet fileprivate weak var blogNameLabel: UILabel!
-    @IBOutlet fileprivate weak var bylineLabel: UILabel!
-    @IBOutlet fileprivate weak var followButton: UIButton!
+    // Header related Views
+    @IBOutlet private weak var headerStackView: UIStackView!
+    @IBOutlet private weak var avatarStackView: UIStackView!
+    @IBOutlet private weak var avatarImageView: UIImageView!
+    @IBOutlet private weak var authorAvatarImageView: UIImageView!
+    @IBOutlet private weak var headerBlogButton: UIButton!
+    @IBOutlet private weak var labelsStackView: UIStackView!
+
+    @IBOutlet private weak var authorAndBlogNameStackView: UIStackView!
+    @IBOutlet private weak var authorNameLabel: UILabel!
+    @IBOutlet private weak var arrowImageView: UIImageView!
+    @IBOutlet private weak var blogNameLabel: UILabel!
+
+    @IBOutlet private weak var hostAndTimeStackView: UIStackView!
+    @IBOutlet private weak var blogHostNameLabel: UILabel!
+    @IBOutlet private weak var bylineLabel: UILabel!
+    @IBOutlet private weak var bylineSeparatorLabel: UILabel!
 
     // Card views
-    @IBOutlet fileprivate weak var featuredImageView: CachedAnimatedImageView!
-    @IBOutlet fileprivate weak var titleLabel: ReaderPostCardContentLabel!
-    @IBOutlet fileprivate weak var summaryLabel: ReaderPostCardContentLabel!
-    @IBOutlet fileprivate weak var attributionView: ReaderCardDiscoverAttributionView!
-    @IBOutlet fileprivate weak var actionStackView: UIStackView!
+    @IBOutlet private weak var featuredImageView: CachedAnimatedImageView!
+    @IBOutlet private weak var titleLabel: ReaderPostCardContentLabel!
+    @IBOutlet private weak var summaryLabel: ReaderPostCardContentLabel!
+    @IBOutlet private weak var attributionView: ReaderCardDiscoverAttributionView!
+    @IBOutlet private weak var actionStackView: UIStackView!
 
     // Helper Views
-    @IBOutlet fileprivate weak var borderedView: UIView!
-    @IBOutlet fileprivate weak var interfaceVerticalSizingHelperView: UIView!
+    @IBOutlet private weak var borderedView: UIView!
+    @IBOutlet private weak var interfaceVerticalSizingHelperView: UIView!
 
     // Action buttons
+    @IBOutlet private var actionButtons: [UIButton]!
+    @IBOutlet private weak var saveForLaterButton: UIButton!
+    @IBOutlet private weak var likeActionButton: UIButton!
+    @IBOutlet private weak var commentActionButton: UIButton!
+    @IBOutlet private weak var menuButton: UIButton!
+    @IBOutlet private weak var reblogActionButton: UIButton!
 
-    @IBOutlet var actionButtons: [UIButton]!
-    @IBOutlet fileprivate weak var saveForLaterButton: UIButton!
-    @IBOutlet fileprivate weak var visitButton: UIButton!
-    @IBOutlet fileprivate weak var likeActionButton: UIButton!
-    @IBOutlet fileprivate weak var commentActionButton: UIButton!
-    @IBOutlet fileprivate weak var menuButton: UIButton!
-    @IBOutlet fileprivate weak var reblogActionButton: UIButton!
+    // Ghost cells placeholders
+    @IBOutlet private weak var ghostPlaceholderView: UIView!
 
-    // Layout Constraints
-    @IBOutlet fileprivate weak var featuredMediaHeightConstraint: NSLayoutConstraint!
+    // Spotlight view
+    private let spotlightView: UIView = {
+        let spotlightView = QuickStartSpotlightView()
+        spotlightView.translatesAutoresizingMaskIntoConstraints = false
+        spotlightView.isHidden = true
+        return spotlightView
+    }()
+
+    /// Whether or not to show the spotlight animation to illustrate tapping the icon.
+    var spotlightIsShown: Bool = false {
+        didSet {
+            spotlightView.isHidden = !spotlightIsShown || !shouldShowCommentActionButton
+        }
+    }
 
     @objc open weak var delegate: ReaderPostCellDelegate?
-    @objc open weak var contentProvider: ReaderPostContentProvider?
+    private weak var contentProvider: ReaderPostContentProvider?
 
-    fileprivate let featuredMediaHeightConstraintConstant = WPDeviceIdentification.isiPad() ? CGFloat(226.0) : CGFloat(100.0)
-    fileprivate var featuredImageDesiredWidth = CGFloat()
+    private var featuredImageDesiredWidth = CGFloat()
 
-    fileprivate let summaryMaxNumberOfLines = 3
-    fileprivate let avgWordsPerMinuteRead = 250
-    fileprivate let minimumMinutesToRead = 2
-    fileprivate var currentLoadedCardImageURL: String?
-    fileprivate var isSmallWidth: Bool {
+    private var currentLoadedCardImageURL: String?
+    private var isSmallWidth: Bool {
         let width = superview?.frame.width ?? 0
         return  width <= 320
     }
 
+    weak var topicChipsDelegate: ReaderTopicsChipsDelegate?
+
+    var displayTopics: Bool = false
+    var isP2Type: Bool = false
+
     // MARK: - Accessors
-    @objc open var hidesFollowButton = false
+
     var loggedInActionVisibility: ReaderActionsVisibility = .visible(enabled: true)
-
-
-    open override func setSelected(_ selected: Bool, animated: Bool) {
-        super.setSelected(selected, animated: animated)
-        setHighlighted(selected, animated: animated)
-    }
-
-    open override func setHighlighted(_ highlighted: Bool, animated: Bool) {
-        let previouslyHighlighted = self.isHighlighted
-        super.setHighlighted(highlighted, animated: animated)
-
-        if previouslyHighlighted == highlighted {
-            return
-        }
-        applyHighlightedEffect(highlighted, animated: animated)
-    }
 
     @objc open var headerBlogButtonIsEnabled: Bool {
         get {
@@ -98,26 +113,30 @@ import Gridicons
                 headerBlogButton.isEnabled = newValue
                 if newValue {
                     blogNameLabel.textColor = WPStyleGuide.readerCardBlogNameLabelTextColor()
+                    authorNameLabel.textColor = WPStyleGuide.readerCardBlogNameLabelTextColor()
+                    configureArrowImage()
                 } else {
                     blogNameLabel.textColor = WPStyleGuide.readerCardBlogNameLabelDisabledTextColor()
+                    authorNameLabel.textColor = WPStyleGuide.readerCardBlogNameLabelDisabledTextColor()
+                    configureArrowImage(withTint: WPStyleGuide.readerCardBlogNameLabelDisabledTextColor())
                 }
             }
         }
     }
 
-    fileprivate lazy var imageLoader: ImageLoader = {
+    private lazy var imageLoader: ImageLoader = {
         return ImageLoader(imageView: featuredImageView)
     }()
 
-    fileprivate lazy var readerCardTitleAttributes: [NSAttributedString.Key: Any] = {
+    private lazy var readerCardTitleAttributes: [NSAttributedString.Key: Any] = {
         return WPStyleGuide.readerCardTitleAttributes()
     }()
 
-    fileprivate lazy var readerCardSummaryAttributes: [NSAttributedString.Key: Any] = {
+    private lazy var readerCardSummaryAttributes: [NSAttributedString.Key: Any] = {
         return WPStyleGuide.readerCardSummaryAttributes()
     }()
 
-    fileprivate lazy var readerCardReadingTimeAttributes: [NSAttributedString.Key: Any] = {
+    private lazy var readerCardReadingTimeAttributes: [NSAttributedString.Key: Any] = {
         return WPStyleGuide.readerCardReadingTimeAttributes()
     }()
 
@@ -137,145 +156,50 @@ import Gridicons
         interfaceVerticalSizingHelperView.isHidden = true
 
         setupMenuButton()
-        setupVisitButton()
-        setupCommentActionButton()
-        setupLikeActionButton()
 
         // Buttons must be set up before applying styles,
         // as this tints the images used in the buttons
         applyStyles()
 
         applyOpaqueBackgroundColors()
-        setupFeaturedImageView()
 
+        configureFeaturedImageView()
         setupSummaryLabel()
         setupAttributionView()
+        setupSpotlightView()
         adjustInsetsForTextDirection()
-        insetFollowButtonIcon()
     }
 
     open override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         configureFeaturedImageIfNeeded()
         configureButtonTitles()
+
+        // Update colors
+        applyStyles()
+        setupMenuButton()
+        configureFeaturedImageView()
+        configureAvatarImageView(avatarImageView)
+        configureAvatarImageView(authorAvatarImageView)
     }
 
     open override func prepareForReuse() {
         super.prepareForReuse()
+
         imageLoader.prepareForReuse()
-    }
+        displayTopics = false
+        isP2Type = false
 
-
-    // MARK: - Configuration
-
-    fileprivate func setupAttributionView() {
-        attributionView.delegate = self
-    }
-
-    fileprivate func setupFeaturedImageView() {
-        featuredMediaHeightConstraint.constant = featuredMediaHeightConstraintConstant
-    }
-
-    fileprivate func setupSummaryLabel() {
-        summaryLabel.numberOfLines = summaryMaxNumberOfLines
-        summaryLabel.lineBreakMode = .byTruncatingTail
-    }
-
-    fileprivate func setupCommentActionButton() {
-        let image = UIImage(named: "icon-reader-comment")?.imageFlippedForRightToLeftLayoutDirection()
-        let highlightImage = UIImage(named: "icon-reader-comment-highlight")?.imageFlippedForRightToLeftLayoutDirection()
-        commentActionButton.setImage(image, for: UIControl.State())
-        commentActionButton.setImage(highlightImage, for: .highlighted)
-    }
-
-    fileprivate func setupLikeActionButton() {
-        let likeImage = UIImage(named: "icon-reader-like")
-        let likedImage = UIImage(named: "icon-reader-liked")
-
-        likeActionButton.setImage(likeImage, for: .normal)
-        likeActionButton.setImage(likedImage, for: .highlighted)
-        likeActionButton.setImage(likedImage, for: .selected)
-        likeActionButton.setImage(likedImage, for: [.highlighted, .selected])
-    }
-
-    fileprivate func setupVisitButton() {
-        let size = CGSize(width: 20, height: 20)
-        let title = NSLocalizedString("Visit", comment: "Verb. Button title.  Tap to visit a website.")
-        let icon = Gridicon.iconOfType(.external, withSize: size)
-        let tintedIcon = icon.imageFlippedForRightToLeftLayoutDirection()
-        let highlightIcon = icon.imageFlippedForRightToLeftLayoutDirection()
-
-        visitButton.setTitle(title, for: UIControl.State())
-        visitButton.setImage(tintedIcon, for: .normal)
-        visitButton.setImage(highlightIcon, for: .highlighted)
-    }
-
-    fileprivate func setupMenuButton() {
-        let size = CGSize(width: 20, height: 20)
-        let icon = Gridicon.iconOfType(.ellipsis, withSize: size)
-        let tintedIcon = icon.imageWithTintColor(.neutral(.shade30))
-        let highlightIcon = icon.imageWithTintColor(.neutral)
-
-        menuButton.setImage(tintedIcon, for: .normal)
-        menuButton.setImage(highlightIcon, for: .highlighted)
-    }
-
-    fileprivate func adjustInsetsForTextDirection() {
-        let buttonsToAdjust: [UIButton] = [
-            visitButton,
-            likeActionButton,
-            commentActionButton,
-            saveForLaterButton,
-            reblogActionButton]
-        for button in buttonsToAdjust {
-            button.flipInsetsForRightToLeftLayoutDirection()
-        }
-    }
-
-    /**
-        Applies the default styles to the cell's subviews
-    */
-    fileprivate func applyStyles() {
-        backgroundColor = .clear
-        contentView.backgroundColor = .listBackground
-        borderedView.backgroundColor = .listForeground
-        borderedView.layer.borderColor = WPStyleGuide.readerCardCellBorderColor().cgColor
-        borderedView.layer.borderWidth = .hairlineBorderWidth
-
-        WPStyleGuide.applyReaderSaveForLaterButtonStyle(saveForLaterButton)
-
-        if FeatureFlag.postReblogging.enabled {
-            WPStyleGuide.applyReaderReblogActionButtonStyle(reblogActionButton)
-        }
-
-        WPStyleGuide.applyReaderFollowButtonStyle(followButton)
-        WPStyleGuide.applyReaderCardBlogNameStyle(blogNameLabel)
-        WPStyleGuide.applyReaderCardBylineLabelStyle(bylineLabel)
-        WPStyleGuide.applyReaderCardTitleLabelStyle(titleLabel)
-        WPStyleGuide.applyReaderCardSummaryLabelStyle(summaryLabel)
-        WPStyleGuide.applyReaderActionButtonStyle(commentActionButton)
-        WPStyleGuide.applyReaderActionButtonStyle(likeActionButton)
-        WPStyleGuide.applyReaderActionButtonStyle(visitButton)
-    }
-
-
-    /**
-        Applies opaque backgroundColors to all subViews to avoid blending, for optimized drawing.
-    */
-    fileprivate func applyOpaqueBackgroundColors() {
-        blogNameLabel.backgroundColor = .listForeground
-        bylineLabel.backgroundColor = .listForeground
-        titleLabel.backgroundColor = .listForeground
-        summaryLabel.backgroundColor = .listForeground
-        commentActionButton.titleLabel?.backgroundColor = .listForeground
-        likeActionButton.titleLabel?.backgroundColor = .listForeground
+        topicsCollectionView.collapse()
     }
 
     @objc open func configureCell(_ contentProvider: ReaderPostContentProvider) {
         self.contentProvider = contentProvider
 
+        configureTopicsCollectionView()
         configureHeader()
-        configureFollowButton()
+        configureAvatarImageView(avatarImageView)
+        configureAvatarImageView(authorAvatarImageView)
         configureFeaturedImageIfNeeded()
         configureTitle()
         configureSummary()
@@ -285,47 +209,245 @@ import Gridicons
         prepareForVoiceOver()
     }
 
-    fileprivate func configureHeader() {
-        guard let provider = contentProvider else {
+    func refreshLikeButton() {
+        configureLikeActionButton()
+        configureButtonTitles()
+    }
+
+}
+
+// MARK: - Configuration
+
+private extension ReaderPostCardCell {
+
+    struct Constants {
+        static let featuredMediaCornerRadius: CGFloat = 4
+        static let imageBorderWidth: CGFloat = 1
+        static let featuredMediaTopSpacing: CGFloat = 8
+        static let headerBottomSpacing: CGFloat = 8
+        static let summaryMaxNumberOfLines: NSInteger = 2
+        static let avatarPlaceholderImage: UIImage? = UIImage(named: "post-blavatar-placeholder")
+        static let authorAvatarPlaceholderImage: UIImage? = UIImage(named: "gravatar")
+        static let rotate270Degrees: CGFloat = CGFloat.pi * 1.5
+        static let rotate90Degrees: CGFloat = CGFloat.pi / 2
+        static let spotlightXOffset: CGFloat = 10
+        static let spotlightYOffset: CGFloat = 10
+    }
+
+    // MARK: - Configuration
+
+    func setupAttributionView() {
+        attributionView.delegate = self
+    }
+
+    func setupSummaryLabel() {
+        summaryLabel.numberOfLines = Constants.summaryMaxNumberOfLines
+        summaryLabel.lineBreakMode = .byTruncatingTail
+    }
+
+    func setupMenuButton() {
+        guard let icon = UIImage(named: "icon-menu-vertical-ellipsis") else {
             return
         }
 
+        let tintColor = UIColor(light: .muriel(color: .gray, .shade50),
+                                dark: .textSubtle)
+
+        let highlightColor = UIColor(light: .muriel(color: .gray, .shade10),
+                                     dark: .textQuaternary)
+
+        let tintedIcon = icon.imageWithTintColor(tintColor)
+        let highlightIcon = icon.imageWithTintColor(highlightColor)
+
+        menuButton.setImage(tintedIcon, for: .normal)
+        menuButton.setImage(highlightIcon, for: .highlighted)
+    }
+
+    private func setupSpotlightView() {
+        addSubview(spotlightView)
+        bringSubviewToFront(spotlightView)
+
+        NSLayoutConstraint.activate([
+            commentActionButton.centerXAnchor.constraint(equalTo: spotlightView.centerXAnchor),
+            commentActionButton.centerYAnchor.constraint(equalTo: spotlightView.centerYAnchor, constant: Constants.spotlightYOffset)
+        ])
+    }
+
+    func adjustInsetsForTextDirection() {
+        let buttonsToAdjust: [UIButton] = [
+            likeActionButton,
+            commentActionButton,
+            saveForLaterButton,
+            reblogActionButton]
+        for button in buttonsToAdjust {
+            button.flipInsetsForRightToLeftLayoutDirection()
+        }
+    }
+
+    /// Applies the default styles to the cell's subviews
+    ///
+    func applyStyles() {
+        backgroundColor = .clear
+        contentView.backgroundColor = .listBackground
+        borderedView.backgroundColor = .listForeground
+
+        WPStyleGuide.applyReaderCardBlogNameStyle(blogNameLabel)
+        WPStyleGuide.applyReaderCardBlogNameStyle(authorNameLabel)
+
+        WPStyleGuide.applyReaderCardBylineLabelStyle(blogHostNameLabel)
+        WPStyleGuide.applyReaderCardBylineLabelStyle(bylineLabel)
+        WPStyleGuide.applyReaderCardBylineLabelStyle(bylineSeparatorLabel)
+
+        WPStyleGuide.applyReaderCardTitleLabelStyle(titleLabel)
+        WPStyleGuide.applyReaderCardSummaryLabelStyle(summaryLabel)
+
+        // Action Buttons
+        WPStyleGuide.applyReaderCardSaveForLaterButtonStyle(saveForLaterButton)
+        WPStyleGuide.applyReaderCardReblogActionButtonStyle(reblogActionButton)
+        WPStyleGuide.applyReaderCardLikeButtonStyle(likeActionButton)
+        WPStyleGuide.applyReaderCardCommentButtonStyle(commentActionButton)
+    }
+
+    /// Applies opaque backgroundColors to all subViews to avoid blending, for optimized drawing.
+    ///
+    func applyOpaqueBackgroundColors() {
+        blogNameLabel.backgroundColor = .listForeground
+        authorNameLabel.backgroundColor = .listForeground
+        blogHostNameLabel.backgroundColor = .listForeground
+        bylineLabel.backgroundColor = .listForeground
+        titleLabel.backgroundColor = .listForeground
+        summaryLabel.backgroundColor = .listForeground
+        commentActionButton.titleLabel?.backgroundColor = .listForeground
+        likeActionButton.titleLabel?.backgroundColor = .listForeground
+        topicsCollectionView.backgroundColor = .listForeground
+    }
+
+    func configureTopicsCollectionView() {
+        guard
+            displayTopics,
+            let contentProvider = contentProvider,
+            let tags = contentProvider.tagsForDisplay?(),
+            !tags.isEmpty
+        else {
+            topicsCollectionView.isHidden = true
+            return
+        }
+
+        topicsCollectionView.topicDelegate = self
+        topicsCollectionView.topics = tags
+        topicsCollectionView.isHidden = false
+    }
+
+}
+
+// MARK: - Header Configuration
+
+private extension ReaderPostCardCell {
+
+    func configureHeader() {
+
         // Always reset
-        avatarImageView.image = nil
+        avatarImageView.image = Constants.avatarPlaceholderImage
+        authorAvatarImageView.image = Constants.authorAvatarPlaceholderImage
 
+        setSiteIcon()
+        setAuthorAvatar()
+        setBlogLabels()
+
+        avatarStackView.isHidden = avatarImageView.isHidden && authorAvatarImageView.isHidden
+    }
+
+    func setSiteIcon() {
         let size = avatarImageView.frame.size.width * UIScreen.main.scale
-        if let url = provider.siteIconForDisplay(ofSize: Int(size)) {
-            if provider.isPrivate() {
-                let request = PrivateSiteURLProtocol.requestForPrivateSite(from: url)
-                avatarImageView.downloadImage(usingRequest: request)
-            } else {
-                avatarImageView.downloadImage(from: url)
-            }
-            avatarImageView.isHidden = false
 
-        } else {
+        guard let contentProvider = contentProvider,
+              let url = contentProvider.siteIconForDisplay(ofSize: Int(size)) else {
             avatarImageView.isHidden = true
+            return
         }
 
-        var arr = [String]()
-        if let authorName = provider.authorForDisplay() {
-            arr.append(authorName)
-        }
-        if let blogName = provider.blogNameForDisplay() {
-            arr.append(blogName)
-        }
-        blogNameLabel.text = arr.joined(separator: ", ")
+        let mediaRequestAuthenticator = MediaRequestAuthenticator()
+        let host = MediaHost(with: contentProvider, failure: { error in
+            // We'll log the error, so we know it's there, but we won't halt execution.
+            DDLogError("ReaderPostCardCell MediaHost error: \(error.localizedDescription)")
+        })
 
-        let byline = datePublished()
-        bylineLabel.text = byline
+        mediaRequestAuthenticator.authenticatedRequest(
+            for: url,
+            from: host,
+            onComplete: { request in
+                self.avatarImageView.downloadImage(usingRequest: request)
+                self.avatarImageView.isHidden = false
+            },
+            onFailure: { error in
+                WordPressAppDelegate.crashLogging?.logError(error)
+                self.avatarImageView.isHidden = true
+            })
     }
 
-    fileprivate func configureFollowButton() {
-        followButton.isHidden = hidesFollowButton
-        followButton.isSelected = contentProvider?.isFollowing() ?? false
+    func setAuthorAvatar() {
+        guard isP2Type,
+              let contentProvider = contentProvider,
+              let url = contentProvider.avatarURLForDisplay() else {
+            authorAvatarImageView.isHidden = true
+            return
+        }
+
+        authorAvatarImageView.isHidden = false
+        authorAvatarImageView.downloadImage(from: url, placeholderImage: Constants.authorAvatarPlaceholderImage)
     }
 
-    fileprivate func configureFeaturedImageIfNeeded() {
+    func setBlogLabels() {
+        guard let contentProvider = contentProvider else {
+            return
+        }
+
+        authorNameLabel.isHidden = !isP2Type
+        arrowImageView.isHidden = !isP2Type
+
+        if isP2Type {
+            authorNameLabel.text = contentProvider.authorForDisplay()
+            configureArrowImage()
+        }
+
+        blogNameLabel.text = blogName()
+        blogHostNameLabel.text = contentProvider.siteHostNameForDisplay()
+
+        let dateString: String = datePublished()
+        bylineSeparatorLabel.isHidden = dateString.isEmpty
+        bylineLabel.text = dateString
+    }
+
+    func configureArrowImage(withTint tint: UIColor = WPStyleGuide.readerCardBlogNameLabelTextColor()) {
+        arrowImageView.image = UIImage.gridicon(.dropdown).imageWithTintColor(tint)
+
+        let imageRotationAngle = (userInterfaceLayoutDirection() == .rightToLeft) ?
+            Constants.rotate90Degrees :
+            Constants.rotate270Degrees
+
+        arrowImageView.transform = CGAffineTransform(rotationAngle: imageRotationAngle)
+    }
+
+    func configureAvatarImageView(_ imageView: UIImageView) {
+        imageView.layer.borderColor = WPStyleGuide.readerCardBlogIconBorderColor().cgColor
+        imageView.layer.borderWidth = Constants.imageBorderWidth
+        imageView.layer.masksToBounds = true
+    }
+
+}
+
+// MARK: - Card Configuration
+
+private extension ReaderPostCardCell {
+
+    func configureFeaturedImageView() {
+        // Round the corners, and add a border
+        featuredImageView.layer.cornerRadius = Constants.featuredMediaCornerRadius
+        featuredImageView.layer.borderColor = WPStyleGuide.readerCardFeaturedMediaBorderColor().cgColor
+        featuredImageView.layer.borderWidth = Constants.imageBorderWidth
+    }
+
+    func configureFeaturedImageIfNeeded() {
         guard let content = contentProvider else {
             return
         }
@@ -333,8 +455,12 @@ import Gridicons
             imageLoader.prepareForReuse()
             currentLoadedCardImageURL = nil
             featuredImageView.isHidden = true
+
+            contentStackView.setCustomSpacing(Constants.headerBottomSpacing, after: headerStackView)
             return
         }
+
+        contentStackView.setCustomSpacing(Constants.headerBottomSpacing + Constants.featuredMediaTopSpacing, after: headerStackView)
 
         featuredImageView.layoutIfNeeded()
         if (!featuredImageURL.isGif && featuredImageView.image == nil) ||
@@ -345,20 +471,26 @@ import Gridicons
         }
     }
 
-    fileprivate func configureFeaturedImage(_ featuredImageURL: URL) {
-        guard let content = contentProvider else {
+    func configureFeaturedImage(_ featuredImageURL: URL) {
+        guard let contentProvider = contentProvider else {
             return
         }
 
         featuredImageView.isHidden = false
         currentLoadedCardImageURL = featuredImageURL.absoluteString
         featuredImageDesiredWidth = featuredImageView.frame.width
-        let size = CGSize(width: featuredImageDesiredWidth, height: featuredMediaHeightConstraintConstant)
-        let postInfo = ReaderCardContent(provider: content)
-        imageLoader.loadImage(with: featuredImageURL, from: postInfo, preferredSize: size)
+
+        let featuredImageHeight = featuredImageView.frame.height
+
+        let size = CGSize(width: featuredImageDesiredWidth, height: featuredImageHeight)
+        let host = MediaHost(with: contentProvider, failure: { error in
+            // We'll log the error, so we know it's there, but we won't halt execution.
+            WordPressAppDelegate.crashLogging?.logError(error)
+        })
+        imageLoader.loadImage(with: featuredImageURL, from: host, preferredSize: size)
     }
 
-    fileprivate func configureTitle() {
+    func configureTitle() {
         if let title = contentProvider?.titleForDisplay(), !title.isEmpty() {
             titleLabel.attributedText = NSAttributedString(string: title, attributes: readerCardTitleAttributes)
             titleLabel.isHidden = false
@@ -368,7 +500,7 @@ import Gridicons
         }
     }
 
-    fileprivate func configureSummary() {
+    func configureSummary() {
         if let summary = contentProvider?.contentPreviewForDisplay(), !summary.isEmpty() {
             summaryLabel.attributedText = NSAttributedString(string: summary, attributes: readerCardSummaryAttributes)
             summaryLabel.isHidden = false
@@ -378,7 +510,7 @@ import Gridicons
         }
     }
 
-    fileprivate func configureAttribution() {
+    func configureAttribution() {
         if contentProvider == nil || contentProvider?.sourceAttributionStyle() == SourceAttributionStyle.none {
             attributionView.configureView(nil)
             attributionView.isHidden = true
@@ -388,7 +520,19 @@ import Gridicons
         }
     }
 
-    fileprivate func configureActionButtons() {
+}
+
+// MARK: - Button Configuration
+
+private extension ReaderPostCardCell {
+
+    enum CardAction: Int {
+        case comment = 1
+        case like
+        case reblog
+    }
+
+    func configureActionButtons() {
         if contentProvider == nil || contentProvider?.sourceAttributionStyle() != SourceAttributionStyle.none {
             resetActionButton(commentActionButton)
             resetActionButton(likeActionButton)
@@ -405,13 +549,13 @@ import Gridicons
         configureActionButtonsInsets()
     }
 
-    fileprivate func resetActionButton(_ button: UIButton) {
+    func resetActionButton(_ button: UIButton) {
         button.setTitle(nil, for: UIControl.State())
         button.isSelected = false
-        button.isHidden = true
+        button.isEnabled = false
     }
 
-    private func configureActionButtonsInsets() {
+    func configureActionButtonsInsets() {
         actionButtons.forEach { button in
             if isSmallWidth {
                 button.contentEdgeInsets = UIEdgeInsets(top: 0, left: 4, bottom: 0, right: 4)
@@ -422,29 +566,19 @@ import Gridicons
         }
     }
 
-    fileprivate func configureLikeActionButton() {
-        // Show likes if logged in, or if likes exist, but not if external
-        guard shouldShowLikeActionButton else {
-            resetActionButton(likeActionButton)
-            return
-        }
-
-        likeActionButton.tag = CardAction.like.rawValue
-        likeActionButton.isEnabled = loggedInActionVisibility.isEnabled
-        likeActionButton.isSelected = contentProvider!.isLiked()
-        likeActionButton.isHidden = false
-    }
-
-    fileprivate var shouldShowLikeActionButton: Bool {
+    var shouldShowLikeActionButton: Bool {
         guard loggedInActionVisibility != .hidden else {
             return false
         }
 
-        guard let contentProvider = contentProvider else {
+        guard
+            let contentProvider = contentProvider,
+            let likeCount = contentProvider.likeCount()
+        else {
             return false
         }
 
-        let hasLikes = contentProvider.likeCount().intValue > 0
+        let hasLikes = likeCount.intValue > 0
 
         guard loggedInActionVisibility.isEnabled || hasLikes else {
             return false
@@ -453,17 +587,19 @@ import Gridicons
         return !contentProvider.isExternal()
     }
 
-    fileprivate func configureCommentActionButton() {
-        guard shouldShowCommentActionButton else {
-            resetActionButton(commentActionButton)
+    func configureLikeActionButton() {
+        // Show likes if logged in, or if likes exist, but not if external
+        guard shouldShowLikeActionButton else {
+            resetActionButton(likeActionButton)
             return
         }
 
-        commentActionButton.tag = CardAction.comment.rawValue
-        commentActionButton.isHidden = false
+        likeActionButton.tag = CardAction.like.rawValue
+        likeActionButton.isEnabled = loggedInActionVisibility.isEnabled
+        likeActionButton.isSelected = contentProvider?.isLiked() ?? false
     }
 
-    fileprivate var shouldShowCommentActionButton: Bool {
+    var shouldShowCommentActionButton: Bool {
         guard loggedInActionVisibility != .hidden else {
             return false
         }
@@ -482,22 +618,30 @@ import Gridicons
         return usesWPComAPI && (contentProvider.commentsOpen() || hasComments)
     }
 
+    func configureCommentActionButton() {
+        guard shouldShowCommentActionButton else {
+            resetActionButton(commentActionButton)
+            return
+        }
 
-    fileprivate func configureSaveForLaterButton() {
-        saveForLaterButton.isHidden = false
+        commentActionButton.tag = CardAction.comment.rawValue
+        commentActionButton.isEnabled = true
+    }
+
+    func configureSaveForLaterButton() {
+        saveForLaterButton.isEnabled = true
         let postIsSavedForLater = contentProvider?.isSavedForLater() ?? false
         saveForLaterButton.isSelected = postIsSavedForLater
     }
 
-    fileprivate func configureReblogActionButton() {
+    func configureReblogActionButton() {
         reblogActionButton.tag = CardAction.reblog.rawValue
-        reblogActionButton.isHidden = !shouldShowReblogActionButton
+        reblogActionButton.isEnabled = shouldShowReblogActionButton
     }
 
-    fileprivate var shouldShowReblogActionButton: Bool {
+    var shouldShowReblogActionButton: Bool {
         // reblog button is hidden if there's no content
-        guard FeatureFlag.postReblogging.enabled,
-            let provider = contentProvider,
+        guard let provider = contentProvider,
             !provider.isPrivate(),
             loggedInActionVisibility.isEnabled else {
             return false
@@ -505,7 +649,7 @@ import Gridicons
         return true
     }
 
-    fileprivate func configureButtonTitles() {
+    func configureButtonTitles() {
         guard let provider = contentProvider else {
             return
         }
@@ -519,12 +663,9 @@ import Gridicons
             let commentTitle = commentCount > 0 ? String(commentCount) : ""
             likeActionButton.setTitle(likeTitle, for: .normal)
             commentActionButton.setTitle(commentTitle, for: .normal)
-            if FeatureFlag.postReblogging.enabled {
-                WPStyleGuide.applyReaderSaveForLaterButtonTitles(saveForLaterButton, showTitle: false)
-                WPStyleGuide.applyReaderReblogActionButtonTitle(reblogActionButton, showTitle: false)
-            } else {
-                saveForLaterButton.setTitle("", for: .normal)
-            }
+            WPStyleGuide.applyReaderSaveForLaterButtonTitles(saveForLaterButton, showTitle: false)
+            WPStyleGuide.applyReaderReblogActionButtonTitle(reblogActionButton, showTitle: false)
+
         } else {
             let likeTitle = WPStyleGuide.likeCountForDisplay(likeCount)
             let commentTitle = WPStyleGuide.commentCountForDisplay(commentCount)
@@ -533,80 +674,52 @@ import Gridicons
             commentActionButton.setTitle(commentTitle, for: .normal)
 
             WPStyleGuide.applyReaderSaveForLaterButtonTitles(saveForLaterButton)
-            if FeatureFlag.postReblogging.enabled {
-                WPStyleGuide.applyReaderReblogActionButtonTitle(reblogActionButton)
-            }
+            WPStyleGuide.applyReaderReblogActionButtonTitle(reblogActionButton)
         }
     }
 
-    /// Adds some space between the button and title.
-    /// Setting the titleEdgeInset.left seems to be ignored in IB for whatever reason,
-    /// so we'll add/remove it from the image as needed.
-    fileprivate func insetFollowButtonIcon() {
-        var insets = followButton.imageEdgeInsets
-        insets.right = 2.0
-        followButton.imageEdgeInsets = insets
-        followButton.flipInsetsForRightToLeftLayoutDirection()
-    }
+}
 
-    fileprivate func applyHighlightedEffect(_ highlighted: Bool, animated: Bool) {
-        func updateBorder() {
-            self.borderedView.layer.borderColor = highlighted ? WPStyleGuide.readerCardCellHighlightedBorderColor().cgColor : WPStyleGuide.readerCardCellBorderColor().cgColor
-        }
-        guard animated else {
-            updateBorder()
-            return
-        }
-        UIView.animate(withDuration: 0.25,
-            delay: 0,
-            options: UIView.AnimationOptions(),
-            animations: updateBorder)
-    }
+// MARK: - Button Actions
 
+extension ReaderPostCardCell {
 
-    // MARK: -
+    // MARK: - Header Tapped
 
     @objc func notifyDelegateHeaderWasTapped() {
-        if headerBlogButtonIsEnabled {
-            delegate?.readerCell(self, headerActionForProvider: contentProvider!)
-        }
-    }
-
-
-    // MARK: - Actions
-
-    @IBAction func didTapFollowButton(_ sender: UIButton) {
-        guard let provider = contentProvider else {
+        guard headerBlogButtonIsEnabled,
+              let contentProvider = contentProvider else {
             return
         }
-        delegate?.readerCell(self, followActionForProvider: provider)
+
+        delegate?.readerCell(self, headerActionForProvider: contentProvider)
     }
+
+    // MARK: - Actions
 
     @IBAction func didTapHeaderBlogButton(_ sender: UIButton) {
         notifyDelegateHeaderWasTapped()
     }
 
     @IBAction func didTapMenuButton(_ sender: UIButton) {
-        delegate?.readerCell(self, menuActionForProvider: contentProvider!, fromView: sender)
-    }
-
-    @IBAction func didTapVisitButton(_ sender: UIButton) {
-        guard let provider = contentProvider else {
+        guard let contentProvider = contentProvider else {
             return
         }
-        delegate?.readerCell(self, visitActionForProvider: provider)
+
+        delegate?.readerCell(self, menuActionForProvider: contentProvider, fromView: sender)
     }
 
     @IBAction func didTapSaveForLaterButton(_ sender: UIButton) {
-        guard let provider = contentProvider else {
+        guard let contentProvider = contentProvider else {
             return
         }
-        delegate?.readerCell(self, saveActionForProvider: provider)
+
+        delegate?.readerCell(self, saveActionForProvider: contentProvider)
         configureSaveForLaterButton()
     }
 
     @IBAction func didTapActionButton(_ sender: UIButton) {
-        guard let contentProvider = self.contentProvider,
+        guard let contentProvider = contentProvider,
             let tag = CardAction(rawValue: sender.tag) else {
             return
         }
@@ -621,32 +734,31 @@ import Gridicons
         }
     }
 
-
     // MARK: - Custom UI Actions
 
     @IBAction func blogButtonTouchesDidHighlight(_ sender: UIButton) {
         blogNameLabel.isHighlighted = true
+        authorNameLabel.isHighlighted = true
+        configureArrowImage(withTint: .primaryLight)
     }
 
     @IBAction func blogButtonTouchesDidEnd(_ sender: UIButton) {
         blogNameLabel.isHighlighted = false
+        authorNameLabel.isHighlighted = false
+        configureArrowImage()
     }
 
-
-    // MARK: - Private Types
-
-    fileprivate enum CardAction: Int {
-        case comment = 1
-        case like
-        case reblog
-    }
 }
+
+// MARK: - ReaderCardDiscoverAttributionViewDelegate
 
 extension ReaderPostCardCell: ReaderCardDiscoverAttributionViewDelegate {
     public func attributionActionSelectedForVisitingSite(_ view: ReaderCardDiscoverAttributionView) {
         delegate?.readerCell(self, attributionActionForProvider: contentProvider!)
     }
 }
+
+// MARK: - Accessibility
 
 extension ReaderPostCardCell: Accessible {
     func prepareForVoiceOver() {
@@ -656,31 +768,30 @@ extension ReaderPostCardCell: Accessible {
         prepareCommentsForVoiceOver()
         prepareLikeForVoiceOver()
         prepareMenuForVoiceOver()
-        prepareVisitForVoiceOver()
-        prepareFollowButtonForVoiceOver()
-        if FeatureFlag.postReblogging.enabled {
-            prepareReblogForVoiceOver()
-        }
+        prepareReblogForVoiceOver()
     }
+}
 
-    private func prepareCardForVoiceOver() {
+private extension ReaderPostCardCell {
+
+    func prepareCardForVoiceOver() {
         accessibilityLabel = cardAccessibilityLabel()
         accessibilityHint = cardAccessibilityHint()
         accessibilityTraits = UIAccessibilityTraits.button
     }
 
-    private func cardAccessibilityLabel() -> String {
+    func cardAccessibilityLabel() -> String {
         let authorName = postAuthor()
         let blogTitle = blogName()
 
         return headerButtonAccessibilityLabel(name: authorName, title: blogTitle) + ", " + postTitle() + ", " + postContent()
     }
 
-    private func cardAccessibilityHint() -> String {
+    func cardAccessibilityHint() -> String {
         return NSLocalizedString("Shows the post content", comment: "Accessibility hint for the Reader Cell")
     }
 
-    private func prepareHeaderButtonForVoiceOver() {
+    func prepareHeaderButtonForVoiceOver() {
         guard headerBlogButtonIsEnabled else {
             /// When the headerbutton is disabled, hide it from VoiceOver as well.
             headerBlogButton.isAccessibilityElement = false
@@ -697,52 +808,50 @@ extension ReaderPostCardCell: Accessible {
         headerBlogButton.accessibilityTraits = UIAccessibilityTraits.button
     }
 
-    private func headerButtonAccessibilityLabel(name: String, title: String) -> String {
+    func headerButtonAccessibilityLabel(name: String, title: String) -> String {
         return authorNameAndBlogTitle(name: name, title: title) + ", " + datePublished()
     }
 
-    private func authorNameAndBlogTitle(name: String, title: String) -> String {
+    func authorNameAndBlogTitle(name: String, title: String) -> String {
         let format = NSLocalizedString("Post by %@, from %@", comment: "Spoken accessibility label for blog author and name in Reader cell.")
 
         return String(format: format, name, title)
     }
 
-    private func headerButtonAccessibilityHint(title: String) -> String {
+    func headerButtonAccessibilityHint(title: String) -> String {
         let format = NSLocalizedString("Shows all posts from %@", comment: "Spoken accessibility hint for blog name in Reader cell.")
         return String(format: format, title)
     }
 
-    private func prepareSaveForLaterForVoiceOver() {
+    func prepareSaveForLaterForVoiceOver() {
         let isSavedForLater = contentProvider?.isSavedForLater() ?? false
         saveForLaterButton.accessibilityLabel = isSavedForLater ? NSLocalizedString("Saved Post", comment: "Accessibility label for the 'Save Post' button when a post has been saved.") : NSLocalizedString("Save post", comment: "Accessibility label for the 'Save Post' button.")
         saveForLaterButton.accessibilityHint = isSavedForLater ? NSLocalizedString("Remove this post from my saved posts.", comment: "Accessibility hint for the 'Save Post' button when a post is already saved.") : NSLocalizedString("Saves this post for later.", comment: "Accessibility hint for the 'Save Post' button.")
         saveForLaterButton.accessibilityTraits = UIAccessibilityTraits.button
     }
 
-    private func prepareCommentsForVoiceOver() {
+    func prepareCommentsForVoiceOver() {
         commentActionButton.accessibilityLabel = commentsLabel()
         commentActionButton.accessibilityHint = NSLocalizedString("Shows comments", comment: "Spoken accessibility hint for Comments buttons")
         commentActionButton.accessibilityTraits = UIAccessibilityTraits.button
     }
 
-    private func commentsLabel() -> String {
+    func commentsLabel() -> String {
         let commentCount = contentProvider?.commentCount()?.intValue ?? 0
-
         let format = commentCount > 1 ? pluralCommentFormat() : singularCommentFormat()
-
         return String(format: format, "\(commentCount)")
     }
 
-    private func singularCommentFormat() -> String {
+    func singularCommentFormat() -> String {
         return NSLocalizedString("%@ comment", comment: "Accessibility label for comments button (singular)")
     }
 
-    private func pluralCommentFormat() -> String {
+    func pluralCommentFormat() -> String {
         return NSLocalizedString("%@ comments", comment: "Accessibility label for comments button (plural)")
     }
 
-    private func prepareLikeForVoiceOver() {
-        guard likeActionButton.isHidden == false else {
+    func prepareLikeForVoiceOver() {
+        guard likeActionButton.isEnabled == true else {
             return
         }
 
@@ -751,27 +860,25 @@ extension ReaderPostCardCell: Accessible {
         likeActionButton.accessibilityTraits = UIAccessibilityTraits.button
     }
 
-    private func likeLabel() -> String {
+    func likeLabel() -> String {
         return isContentLiked() ? isLikedLabel(): isNotLikedLabel()
     }
 
-    private func isContentLiked() -> Bool {
+    func isContentLiked() -> Bool {
         return contentProvider?.isLiked() ?? false
     }
 
-    private func isLikedLabel() -> String {
+    func isLikedLabel() -> String {
         let postInMyLikes = NSLocalizedString("This post is in My Likes", comment: "Post is in my likes. Accessibility label")
-
         return appendLikedCount(label: postInMyLikes)
     }
 
-    private func isNotLikedLabel() -> String {
+    func isNotLikedLabel() -> String {
         let postNotInMyLikes = NSLocalizedString("This post is not in My Likes", comment: "Post is not in my likes. Accessibility label")
-
         return appendLikedCount(label: postNotInMyLikes)
     }
 
-    private func appendLikedCount(label: String) -> String {
+    func appendLikedCount(label: String) -> String {
         if let likeCount = contentProvider?.likeCountForDisplay() {
             return label + ", " + likeCount
         } else {
@@ -779,93 +886,76 @@ extension ReaderPostCardCell: Accessible {
         }
     }
 
-    private func likeHint() -> String {
+    func likeHint() -> String {
         return isContentLiked() ? doubleTapToUnlike() : doubleTapToLike()
     }
 
-    private func doubleTapToUnlike() -> String {
+    func doubleTapToUnlike() -> String {
         return NSLocalizedString("Removes this post from My Likes", comment: "Removes a post from My Likes. Spoken Hint.")
     }
 
-    private func doubleTapToLike() -> String {
+    func doubleTapToLike() -> String {
         return NSLocalizedString("Adds this post to My Likes", comment: "Adds a post to My Likes. Spoken Hint.")
     }
 
-    private func prepareMenuForVoiceOver() {
+    func prepareMenuForVoiceOver() {
         menuButton.accessibilityLabel = NSLocalizedString("More", comment: "Accessibility label for the More button on Reader Cell")
         menuButton.accessibilityHint = NSLocalizedString("Shows more actions", comment: "Accessibility label for the More button on Reader Cell.")
         menuButton.accessibilityTraits = UIAccessibilityTraits.button
     }
 
-    private func prepareVisitForVoiceOver() {
-        visitButton.accessibilityLabel = NSLocalizedString("Visit", comment: "Verb. Button title. Accessibility label in Reader")
-        let hintFormat = NSLocalizedString("Visit %@ in a web view", comment: "A call to action to visit the specified blog via a web view. Accessibility hint in Reader")
-        visitButton.accessibilityHint = String(format: hintFormat, blogName())
-        visitButton.accessibilityTraits = UIAccessibilityTraits.button
-    }
-
-    private func prepareReblogForVoiceOver() {
+    func prepareReblogForVoiceOver() {
         reblogActionButton.accessibilityLabel = NSLocalizedString("Reblog post", comment: "Accessibility label for the reblog button.")
         reblogActionButton.accessibilityHint = NSLocalizedString("Reblog this post", comment: "Accessibility hint for the reblog button.")
         reblogActionButton.accessibilityTraits = UIAccessibilityTraits.button
     }
 
-    func prepareFollowButtonForVoiceOver() {
-        if hidesFollowButton {
-            return
-        }
-
-        followButton.accessibilityLabel = followLabel()
-        followButton.accessibilityHint = followHint()
-        followButton.accessibilityTraits = UIAccessibilityTraits.button
-    }
-
-    private func followLabel() -> String {
+    func followLabel() -> String {
         return followButtonIsSelected() ? followingLabel() : notFollowingLabel()
     }
 
-    private func followingLabel() -> String {
+    func followingLabel() -> String {
         return NSLocalizedString("Following", comment: "Accessibility label for following buttons.")
     }
 
-    private func notFollowingLabel() -> String {
+    func notFollowingLabel() -> String {
         return NSLocalizedString("Not following", comment: "Accessibility label for unselected following buttons.")
     }
 
-    private func followHint() -> String {
+    func followHint() -> String {
         return followButtonIsSelected() ? unfollow(): follow()
     }
 
-    private func unfollow() -> String {
+    func unfollow() -> String {
         return NSLocalizedString("Unfollows blog", comment: "Spoken hint describing action for selected following buttons.")
     }
 
-    private func follow() -> String {
+    func follow() -> String {
         return NSLocalizedString("Follows blog", comment: "Spoken hint describing action for unselected following buttons.")
     }
 
-    private func followButtonIsSelected() -> Bool {
+    func followButtonIsSelected() -> Bool {
         return contentProvider?.isFollowing() ?? false
     }
 
-    private func blogName() -> String {
-        return contentProvider?.blogNameForDisplay() ?? ""
+    func blogName() -> String {
+        return contentProvider?.blogNameForDisplay?() ?? ""
     }
 
-    private func postAuthor() -> String {
+    func postAuthor() -> String {
         return contentProvider?.authorForDisplay() ?? ""
     }
 
-    private func postTitle() -> String {
+    func postTitle() -> String {
         return contentProvider?.titleForDisplay() ?? ""
     }
 
-    private func postContent() -> String {
+    func postContent() -> String {
         return contentProvider?.contentPreviewForDisplay() ?? ""
     }
 
-    private func datePublished() -> String {
-        return (contentProvider?.dateForDisplay() as NSDate?)?.mediumString() ?? ""
+    func datePublished() -> String {
+        return contentProvider?.dateForDisplay()?.toMediumString() ?? ""
     }
 }
 
@@ -893,11 +983,39 @@ extension ReaderPostCardCell {
         return menuButton
     }
 
-    func getVisitButtonForTesting() -> UIButton {
-        return visitButton
-    }
-
     func getReblogButtonForTesting() -> UIButton {
         return reblogActionButton
+    }
+}
+
+extension ReaderPostCardCell: GhostableView {
+    public func ghostAnimationWillStart() {
+        borderedView.isGhostableDisabled = true
+        attributionView.isHidden = true
+        menuButton.layer.opacity = 0
+        commentActionButton.setTitle("", for: .normal)
+        likeActionButton.setTitle("", for: .normal)
+        authorAndBlogNameStackView.spacing = 0
+        headerBlogButton.isHidden = true
+        labelsStackView.distribution = .fillEqually
+        labelsStackView.spacing = 8
+        hostAndTimeStackView.alignment = .fill
+        bylineLabel.text = nil
+        bylineLabel.widthAnchor.constraint(equalTo: hostAndTimeStackView.widthAnchor, multiplier: 0.33).isActive = true
+        bylineLabel.isGhostableDisabled = true
+        featuredImageView.layer.borderWidth = 0
+        ghostPlaceholderView.isHidden = false
+    }
+}
+
+extension ReaderPostCardCell: ReaderTopicCollectionViewCoordinatorDelegate {
+    func coordinator(_ coordinator: ReaderTopicCollectionViewCoordinator, didChangeState: ReaderTopicCollectionViewState) {
+        layoutIfNeeded()
+
+        topicChipsDelegate?.heightDidChange()
+    }
+
+    func coordinator(_ coordinator: ReaderTopicCollectionViewCoordinator, didSelectTopic topic: String) {
+        topicChipsDelegate?.didSelect(topic: topic)
     }
 }

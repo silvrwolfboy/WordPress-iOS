@@ -1,32 +1,22 @@
 import XCTest
 @testable import WordPress
 import WPMediaPicker
+import Nimble
 
-class MediaLibraryPickerDataSourceTests: XCTestCase {
+class MediaLibraryPickerDataSourceTests: CoreDataTestCase {
 
-    fileprivate var contextManager: TestContextManager!
-    fileprivate var context: NSManagedObjectContext!
     fileprivate var dataSource: MediaLibraryPickerDataSource!
     fileprivate var blog: Blog!
     fileprivate var post: Post!
 
     override func setUp() {
         super.setUp()
-        contextManager = TestContextManager()
-        context = contextManager.newDerivedContext()
-        blog = NSEntityDescription.insertNewObject(forEntityName: "Blog", into: context) as? Blog
+        blog = NSEntityDescription.insertNewObject(forEntityName: "Blog", into: mainContext) as? Blog
         blog.url = "http://wordpress.com"
         blog.xmlrpc = "http://wordpress.com"
-        post = NSEntityDescription.insertNewObject(forEntityName: Post.entityName(), into: context) as? Post
+        post = NSEntityDescription.insertNewObject(forEntityName: Post.entityName(), into: mainContext) as? Post
         post.blog = blog
         dataSource = MediaLibraryPickerDataSource(blog: blog)
-    }
-
-    override func tearDown() {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
-        super.tearDown()
-        context.rollback()
-        ContextManager.overrideSharedInstance(nil)
     }
 
     func testMediaPixelSize() {
@@ -76,6 +66,44 @@ class MediaLibraryPickerDataSourceTests: XCTestCase {
         self.waitForExpectations(timeout: 5, handler: nil)
     }
 
+    func testMediaGroupUpdates() {
+        contextManager.useAsSharedInstance(untilTestFinished: self)
+        dataSource.setMediaTypeFilter(.image)
+
+        // This variable tracks how many times the album cover (which is what
+        // the "group" is in this use case) has changed.
+        var changes = 0
+        dataSource.registerGroupChangeObserverBlock {
+            changes += 1
+        }
+
+        // Adding a video does not change the album cover.
+        let video = MediaBuilder(mainContext).build()
+        video.remoteStatus = .sync
+        video.blog = self.blog
+        video.mediaType = .video
+        contextManager.saveContextAndWait(mainContext)
+        expect(changes).toNever(beGreaterThan(0))
+
+        // Adding a newly created image changes the album cover.
+        let newImage = MediaBuilder(mainContext).build()
+        newImage.remoteStatus = .sync
+        newImage.blog = self.blog
+        newImage.mediaType = .image
+        newImage.creationDate = Date()
+        contextManager.saveContextAndWait(mainContext)
+        expect(changes).toEventually(equal(1))
+
+        // Adding an old image does not change the album cover.
+        let oldImage = MediaBuilder(mainContext).build()
+        oldImage.remoteStatus = .sync
+        oldImage.blog = self.blog
+        oldImage.mediaType = .image
+        oldImage.creationDate = Date().advanced(by: -60)
+        contextManager.saveContextAndWait(mainContext)
+        expect(changes).toNever(beGreaterThan(1))
+    }
+
     fileprivate func newImageMedia() -> Media? {
         return newMedia(fromResource: "test-image", withExtension: "jpg")
     }
@@ -91,10 +119,9 @@ class MediaLibraryPickerDataSourceTests: XCTestCase {
             return nil
         }
 
-        let mediaService = MediaService(managedObjectContext: context)
+        let service = MediaImportService(coreDataStack: contextManager)
         let expect = self.expectation(description: "Media should be create with success")
-        mediaService.createMedia(with: url as NSURL, blog: blog, post: post, progress: nil, thumbnailCallback: { (media, url) in
-        }, completion: { (media, error) in
+        _ = service.createMedia(with: url as NSURL, blog: blog, post: post, thumbnailCallback: nil, completion: { (media, error) in
             expect.fulfill()
             if let _ = error {
                 XCTFail("Media should be created without error")

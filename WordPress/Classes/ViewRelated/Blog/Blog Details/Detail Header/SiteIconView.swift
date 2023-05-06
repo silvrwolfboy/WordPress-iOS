@@ -4,8 +4,7 @@ class SiteIconView: UIView {
         static let imageSize: CGFloat = 64
         static let borderRadius: CGFloat = 4
         static let imageRadius: CGFloat = 2
-        static let imagePadding: CGFloat = 4
-        static let spotlightOffset: CGFloat = -8
+        static let spotlightOffset: CGFloat = 8
     }
 
     /// Whether or not to show the spotlight animation to illustrate tapping the icon.
@@ -34,7 +33,7 @@ class SiteIconView: UIView {
     }()
 
     let activityIndicator: UIActivityIndicatorView = {
-        let indicatorView = UIActivityIndicatorView(style: .whiteLarge)
+        let indicatorView = UIActivityIndicatorView(style: .large)
         indicatorView.translatesAutoresizingMaskIntoConstraints = false
         return indicatorView
     }()
@@ -73,13 +72,12 @@ class SiteIconView: UIView {
         }
     }
 
-    override init(frame: CGRect) {
+    init(frame: CGRect, insets: UIEdgeInsets = .zero) {
         super.init(frame: frame)
 
-        let paddingInsets = UIEdgeInsets(top: Constants.imagePadding, left: Constants.imagePadding, bottom: Constants.imagePadding, right: Constants.imagePadding)
-
         button.addSubview(imageView)
-        button.pinSubviewToAllEdges(imageView, insets: paddingInsets)
+        button.pinSubviewToAllEdges(imageView, insets: insets)
+
         button.addTarget(self, action: #selector(touchedButton), for: .touchUpInside)
         button.translatesAutoresizingMaskIntoConstraints = false
 
@@ -94,8 +92,8 @@ class SiteIconView: UIView {
         addSubview(spotlightView)
 
         NSLayoutConstraint.activate([
-            trailingAnchor.constraint(equalTo: spotlightView.trailingAnchor, constant: Constants.spotlightOffset),
-            bottomAnchor.constraint(equalTo: spotlightView.bottomAnchor, constant: Constants.spotlightOffset)
+            leadingAnchor.constraint(equalTo: spotlightView.leadingAnchor, constant: Constants.spotlightOffset),
+            topAnchor.constraint(equalTo: spotlightView.topAnchor, constant: Constants.spotlightOffset)
         ])
 
         pinSubviewToAllEdges(button)

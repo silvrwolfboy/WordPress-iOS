@@ -2,7 +2,7 @@
 #import <WordPressUI/UIImage+Util.h>
 
 #import "AccountService.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "BlogService.h"
 #import "Blog.h"
 
@@ -18,12 +18,9 @@
 
 static NSString * const WPTabBarRestorationID = @"WPTabBarID";
 
-static NSString * const WPBlogListSplitViewRestorationID = @"WPBlogListSplitViewRestorationID";
 static NSString * const WPReaderSplitViewRestorationID = @"WPReaderSplitViewRestorationID";
-static NSString * const WPMeSplitViewRestorationID = @"WPMeSplitViewRestorationID";
 static NSString * const WPNotificationsSplitViewRestorationID = @"WPNotificationsSplitViewRestorationID";
 
-static NSString * const WPBlogListNavigationRestorationID = @"WPBlogListNavigationID";
 static NSString * const WPReaderNavigationRestorationID = @"WPReaderNavigationID";
 static NSString * const WPMeNavigationRestorationID = @"WPMeNavigationID";
 static NSString * const WPNotificationsNavigationRestorationID  = @"WPNotificationsNavigationID";
@@ -39,28 +36,29 @@ NSString * const WPNewPostURLParamContentKey = @"content";
 NSString * const WPNewPostURLParamTagsKey = @"tags";
 NSString * const WPNewPostURLParamImageKey = @"image";
 
+NSString * const WPTabBarCurrentlySelectedScreenSites = @"Blog List";
+NSString * const WPTabBarCurrentlySelectedScreenReader = @"Reader";
+NSString * const WPTabBarCurrentlySelectedScreenNotifications = @"Notifications";
+
+NSNotificationName const WPTabBarHeightChangedNotification = @"WPTabBarHeightChangedNotification";
+static NSString * const WPTabBarFrameKeyPath = @"frame";
+
 static NSInteger const WPTabBarIconOffsetiPad = 7;
 static NSInteger const WPTabBarIconOffsetiPhone = 5;
-static CGFloat const WPTabBarIconSize = 32.0f;
 
 @interface WPTabBarController () <UITabBarControllerDelegate, UIViewControllerRestoration>
 
-@property (nonatomic, strong) BlogListViewController *blogListViewController;
-@property (nonatomic, strong) NotificationsViewController *notificationsViewController;
-@property (nonatomic, strong) ReaderMenuViewController *readerMenuViewController;
-@property (nonatomic, strong) MeViewController *meViewController;
-@property (nonatomic, strong) QuickStartTourGuide *tourGuide;
-@property (nonatomic, strong) UIViewController *newPostViewController;
+@property (nonatomic, assign) BOOL shouldUseStaticScreens;
 
-@property (nonatomic, strong) UINavigationController *blogListNavigationController;
+@property (nonatomic, strong) NotificationsViewController *notificationsViewController;
+
 @property (nonatomic, strong) UINavigationController *readerNavigationController;
 @property (nonatomic, strong) UINavigationController *notificationsNavigationController;
-@property (nonatomic, strong) UINavigationController *meNavigationController;
 
-@property (nonatomic, strong) WPSplitViewController *blogListSplitViewController;
-@property (nonatomic, strong) WPSplitViewController *readerSplitViewController;
-@property (nonatomic, strong) WPSplitViewController *meSplitViewController;
 @property (nonatomic, strong) WPSplitViewController *notificationsSplitViewController;
+@property (nonatomic, strong) ReaderTabViewModel *readerTabViewModel;
+
+@property (nonatomic, strong, nullable) MySitesCoordinator *mySitesCoordinator;
 
 @property (nonatomic, strong) UIImage *notificationsTabBarImage;
 @property (nonatomic, strong) UIImage *notificationsTabBarImageUnread;
@@ -68,23 +66,13 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 @property (nonatomic, strong) UIImage *meTabBarImageUnreadUnselected;
 @property (nonatomic, strong) UIImage *meTabBarImageUnreadSelected;
 
-@property (nonatomic, strong) CreateButtonCoordinator *createButtonCoordinator;
+@property (nonatomic, assign) CGFloat tabBarHeight;
 
 @end
 
 @implementation WPTabBarController
 
 #pragma mark - Class methods
-
-+ (instancetype)sharedInstance
-{
-    static WPTabBarController *shared = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        shared = [[self alloc] init];
-    });
-    return shared;
-}
 
 + (UIViewController *)viewControllerWithRestorationIdentifierPath:(NSArray *)identifierComponents coder:(NSCoder *)coder
 {
@@ -93,13 +81,12 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 
 #pragma mark - Instance methods
 
-- (instancetype)init
+- (instancetype)initWithStaticScreens:(BOOL)shouldUseStaticScreens
 {
     self = [super init];
     if (self) {
+        _shouldUseStaticScreens = shouldUseStaticScreens;
         [self setDelegate:self];
-        self.tourGuide = [[QuickStartTourGuide alloc] init];
-
         [self setRestorationIdentifier:WPTabBarRestorationID];
         [self setRestorationClass:[WPTabBarController class]];
         [[self tabBar] setAccessibilityIdentifier:@"Main Navigation"];
@@ -110,12 +97,8 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 
         [self setViewControllers:[self tabViewControllers]];
 
-        [self setSelectedViewController:self.blogListSplitViewController];
+        [self setSelectedViewController:self.mySitesCoordinator.rootViewController];
         
-        if ([Feature enabled:FeatureFlagFloatingCreateButton]) {
-            [self.createButtonCoordinator addTo:self.view trailingAnchor:((UIViewController *)self.blogListSplitViewController.viewControllers[0]).view.trailingAnchor bottomAnchor:self.tabBar.topAnchor];
-        }
-
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(updateIconIndicators:)
                                                      name:NSNotification.ZendeskPushNotificationReceivedNotification
@@ -124,16 +107,6 @@ static CGFloat const WPTabBarIconSize = 32.0f;
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(updateIconIndicators:)
                                                      name:NSNotification.ZendeskPushNotificationClearedNotification
-                                                   object:nil];
-
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(showReaderBadge:)
-                                                     name:NSNotification.NewsCardAvailable
-                                                   object:nil];
-
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(hideReaderBadge:)
-                                                     name:NSNotification.NewsCardNotAvailable
                                                    object:nil];
 
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -146,22 +119,28 @@ static CGFloat const WPTabBarIconSize = 32.0f;
                                                      name:WordPressAuthenticator.WPSigninDidFinishNotification
                                                    object:nil];
 
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(switchReaderTabToSavedPosts)
-                                                     name:NSNotification.ShowAllSavedForLaterPostsNotification
-                                                   object:nil];
-
         // Watch for application badge number changes
         [[UIApplication sharedApplication] addObserver:self
                                             forKeyPath:WPApplicationIconBadgeNumberKeyPath
                                                options:NSKeyValueObservingOptionNew
                                                context:nil];
+
+        [self.tabBar addObserver:self
+                      forKeyPath:WPTabBarFrameKeyPath
+                         options:NSKeyValueObservingOptionNew
+                         context:nil];
     }
     return self;
 }
 
+- (instancetype)init
+{
+    return [self initWithStaticScreens:NO];
+}
+
 - (void)dealloc
 {
+    [self.tabBar removeObserver:self forKeyPath:WPTabBarFrameKeyPath];
     [self stopWatchingQuickTours];
     [[UIApplication sharedApplication] removeObserver:self forKeyPath:WPApplicationIconBadgeNumberKeyPath];
 }
@@ -182,40 +161,18 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 
 #pragma mark - Tab Bar Items
 
-- (UINavigationController *)blogListNavigationController
-{
-    if (_blogListNavigationController) {
-        return _blogListNavigationController;
-    }
-
-    self.blogListViewController = [[BlogListViewController alloc] initWithMeScenePresenter:self.meScenePresenter];
-    _blogListNavigationController = [[UINavigationController alloc] initWithRootViewController:self.blogListViewController];
-    _blogListNavigationController.navigationBar.translucent = NO;
-
-    UIImage *mySitesTabBarImage = [UIImage imageNamed:@"icon-tab-mysites"];
-    _blogListNavigationController.tabBarItem.image = mySitesTabBarImage;
-    _blogListNavigationController.tabBarItem.selectedImage = mySitesTabBarImage;
-    _blogListNavigationController.restorationIdentifier = WPBlogListNavigationRestorationID;
-    _blogListNavigationController.tabBarItem.accessibilityLabel = NSLocalizedString(@"My Sites", @"The accessibility value of the my sites tab.");
-    _blogListNavigationController.tabBarItem.accessibilityIdentifier = @"mySitesTabButton";
-    _blogListNavigationController.tabBarItem.title = NSLocalizedString(@"My Sites", @"The accessibility value of the my sites tab.");
-
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    Blog *blogToOpen = [blogService lastUsedOrFirstBlog];
-    if (blogToOpen) {
-        _blogListViewController.selectedBlog = blogToOpen;
-    }
-
-    return _blogListNavigationController;
-}
-
 - (UINavigationController *)readerNavigationController
 {
     if (!_readerNavigationController) {
-        _readerNavigationController = [[UINavigationController alloc] initWithRootViewController:self.readerMenuViewController];
-
+        UIViewController *rootViewController;
+        if (self.shouldUseStaticScreens) {
+            rootViewController = [[MovedToJetpackViewController alloc] initWithSource:MovedToJetpackSourceReader];
+        } else {
+            rootViewController = self.makeReaderTabViewController;
+        }
+        _readerNavigationController = [[UINavigationController alloc] initWithRootViewController:rootViewController];
         _readerNavigationController.navigationBar.translucent = NO;
+        _readerNavigationController.view.backgroundColor = [UIColor murielBasicBackground];
 
         UIImage *readerTabBarImage = [UIImage imageNamed:@"icon-tab-reader"];
         _readerNavigationController.tabBarItem.image = readerTabBarImage;
@@ -228,68 +185,24 @@ static CGFloat const WPTabBarIconSize = 32.0f;
     return _readerNavigationController;
 }
 
-- (ReaderMenuViewController *)readerMenuViewController
-{
-    if (!_readerMenuViewController) {
-        _readerMenuViewController = [ReaderMenuViewController controller];
-    }
-
-    return _readerMenuViewController;
-}
-
-- (UIViewController *)newPostViewController
-{
-    if (_newPostViewController) {
-        return _newPostViewController;
-    }
-
-    _newPostViewController = [[UIViewController alloc] init];
-    _newPostViewController.tabBarItem.accessibilityIdentifier = @"Write";
-    _newPostViewController.tabBarItem.title = NSLocalizedString(@"Write", @"The accessibility value of the post tab.");
-
-    [self updateWriteButtonAppearance];
-
-    return _newPostViewController;
-}
-
-- (UINavigationController *)meNavigationController
-{
-    if (!_meNavigationController) {
-        _meNavigationController = [[UINavigationController alloc] initWithRootViewController:self.meViewController];
-        self.meTabBarImage = [UIImage imageNamed:@"icon-tab-me"];
-        self.meTabBarImageUnreadUnselected = [UIImage imageNamed:@"icon-tab-me-unread-unselected"];
-        self.meTabBarImageUnreadSelected = [UIImage imageNamed:@"icon-tab-me-unread-selected"];
-        _meNavigationController.tabBarItem.image = self.meTabBarImage;
-        _meNavigationController.tabBarItem.selectedImage = self.meTabBarImage;
-        _meNavigationController.restorationIdentifier = WPMeNavigationRestorationID;
-        _meNavigationController.tabBarItem.accessibilityLabel = NSLocalizedString(@"Me", @"The accessibility value of the me tab.");
-        _meNavigationController.tabBarItem.accessibilityIdentifier = @"meTabButton";
-        _meNavigationController.tabBarItem.title = NSLocalizedString(@"Me", @"The accessibility value of the me tab.");
-    }
-    
-    return _meNavigationController;
-}
-//TODO: remove when the new Me navigation is ready
-- (MeViewController *)meViewController {
-    if (!_meViewController) {
-        _meViewController = [MeViewController new];
-    }
-
-    return _meViewController;
-}
-
 - (UINavigationController *)notificationsNavigationController
 {
     if (_notificationsNavigationController) {
         return _notificationsNavigationController;
     }
-
-    UIStoryboard *notificationsStoryboard = [UIStoryboard storyboardWithName:@"Notifications" bundle:nil];
-    self.notificationsViewController = [notificationsStoryboard instantiateInitialViewController];
-    _notificationsNavigationController = [[UINavigationController alloc] initWithRootViewController:self.notificationsViewController];
+    UIViewController *rootViewController;
+    if (self.shouldUseStaticScreens) {
+        rootViewController = [[MovedToJetpackViewController alloc] initWithSource:MovedToJetpackSourceNotifications];
+    } else {
+        UIStoryboard *notificationsStoryboard = [UIStoryboard storyboardWithName:@"Notifications" bundle:nil];
+        self.notificationsViewController = [notificationsStoryboard instantiateInitialViewController];
+        rootViewController = self.notificationsViewController;
+    }
+    _notificationsNavigationController = [[UINavigationController alloc] initWithRootViewController:rootViewController];
     _notificationsNavigationController.navigationBar.translucent = NO;
     self.notificationsTabBarImage = [UIImage imageNamed:@"icon-tab-notifications"];
-    self.notificationsTabBarImageUnread = [[UIImage imageNamed:@"icon-tab-notifications-unread"] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+    NSString *unreadImageName = [AppConfiguration isJetpack] ? @"icon-tab-notifications-unread-jetpack" : @"icon-tab-notifications-unread";
+    self.notificationsTabBarImageUnread = [[UIImage imageNamed:unreadImageName] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
     _notificationsNavigationController.tabBarItem.image = self.notificationsTabBarImage;
     _notificationsNavigationController.tabBarItem.selectedImage = self.notificationsTabBarImage;
     _notificationsNavigationController.restorationIdentifier = WPNotificationsNavigationRestorationID;
@@ -298,33 +211,6 @@ static CGFloat const WPTabBarIconSize = 32.0f;
     _notificationsNavigationController.tabBarItem.title = NSLocalizedString(@"Notifications", @"Notifications tab bar item accessibility label");
 
     return _notificationsNavigationController;
-}
-
-- (void)updateWriteButtonAppearance
-{
-    CGSize size = self.view.bounds.size;
-    CGFloat screenWidth = [[UIScreen mainScreen] bounds].size.width;
-
-    // Try and determine whether the app is displayed at a size which will result in a tab
-    // bar with button titles and images horizontally stacked, instead of vertically
-    BOOL iPhoneLandscape = [WPDeviceIdentification isiPhone] && UIInterfaceOrientationIsLandscape([[UIApplication sharedApplication] statusBarOrientation]);
-    BOOL iPadPortraitFullscreen = [WPDeviceIdentification isiPad] &&
-    UIInterfaceOrientationIsPortrait([[UIApplication sharedApplication] statusBarOrientation]) &&
-    size.width == screenWidth;
-    BOOL iPadLandscapeGreaterThanHalfSplit = [WPDeviceIdentification isiPad] &&
-    UIInterfaceOrientationIsLandscape([[UIApplication sharedApplication] statusBarOrientation]) &&
-    size.width > screenWidth / 2;
-
-    if (iPhoneLandscape || iPadPortraitFullscreen || iPadLandscapeGreaterThanHalfSplit) {
-        self.newPostViewController.tabBarItem.imageInsets = UIEdgeInsetsZero;
-        self.newPostViewController.tabBarItem.titlePositionAdjustment = UIOffsetZero;
-        self.newPostViewController.tabBarItem.image = [Gridicon iconOfType:GridiconTypeCreate withSize:CGSizeMake(WPTabBarIconSize, WPTabBarIconSize)];
-    } else {
-        self.newPostViewController.tabBarItem.imageInsets = [self tabBarIconImageInsets];
-        self.newPostViewController.tabBarItem.titlePositionAdjustment = UIOffsetMake(0, 99999.0);
-
-        self.newPostViewController.tabBarItem.image = [UIImage imageNamed:@"icon-tab-newpost"];
-    }
 }
 
 - (UIEdgeInsets)tabBarIconImageInsets
@@ -341,60 +227,12 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 
 #pragma mark - Split View Controllers
 
-- (UISplitViewController *)blogListSplitViewController
+- (ReaderTabViewModel *)readerTabViewModel
 {
-    if (!_blogListSplitViewController) {
-        _blogListSplitViewController = [WPSplitViewController new];
-        _blogListSplitViewController.restorationIdentifier = WPBlogListSplitViewRestorationID;
-        _blogListSplitViewController.presentsWithGesture = NO;
-        [_blogListSplitViewController setInitialPrimaryViewController:self.blogListNavigationController];
-        _blogListSplitViewController.wpPrimaryColumnWidth = WPSplitViewControllerPrimaryColumnWidthNarrow;
-
-        _blogListSplitViewController.dimsDetailViewControllerAutomatically = YES;
-
-        _blogListSplitViewController.tabBarItem = self.blogListNavigationController.tabBarItem;
+    if (!_readerTabViewModel) {
+        _readerTabViewModel = [self makeReaderTabViewModel];
     }
-
-    return _blogListSplitViewController;
-}
-
-- (UISplitViewController *)readerSplitViewController
-{
-    if (!_readerSplitViewController) {
-        _readerSplitViewController = [WPSplitViewController new];
-        _readerSplitViewController.restorationIdentifier = WPReaderSplitViewRestorationID;
-        _readerSplitViewController.presentsWithGesture = NO;
-        [_readerSplitViewController setInitialPrimaryViewController:self.readerNavigationController];
-        _readerSplitViewController.wpPrimaryColumnWidth = WPSplitViewControllerPrimaryColumnWidthNarrow;
-        _readerSplitViewController.collapseMode = WPSplitViewControllerCollapseModeAlwaysKeepDetail;
-
-        // There's currently a bug on Plus sized phones where the detail navigation
-        // stack gets corrupted after restoring state: https://github.com/wordpress-mobile/WordPress-iOS/pull/6287#issuecomment-266877329
-        // I've been unable to resolve it thus far, so for now we'll disable
-        // landscape split view on Plus devices for the Reader.
-        // James Frost 2017-01-09
-         if ([WPDeviceIdentification isUnzoomediPhonePlus]) {
-            [_readerSplitViewController setOverrideTraitCollection:[UITraitCollection traitCollectionWithHorizontalSizeClass:UIUserInterfaceSizeClassCompact]];
-        }
-
-        _readerSplitViewController.tabBarItem = self.readerNavigationController.tabBarItem;
-    }
-
-    return _readerSplitViewController;
-}
-
-- (UISplitViewController *)meSplitViewController
-{
-    if (!_meSplitViewController) {
-        _meSplitViewController = [WPSplitViewController new];
-        _meSplitViewController.restorationIdentifier = WPMeSplitViewRestorationID;
-        [_meSplitViewController setInitialPrimaryViewController:self.meNavigationController];
-        _meSplitViewController.wpPrimaryColumnWidth = WPSplitViewControllerPrimaryColumnWidthNarrow;
-
-        _meSplitViewController.tabBarItem = self.meNavigationController.tabBarItem;
-    }
-    
-    return _meSplitViewController;
+    return _readerTabViewModel;
 }
 
 - (UISplitViewController *)notificationsSplitViewController
@@ -414,21 +252,12 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 
 - (void)reloadSplitViewControllers
 {
-    _blogListNavigationController = nil;
-    _blogListSplitViewController = nil;
     _readerNavigationController = nil;
-    _readerMenuViewController = nil;
-    _readerSplitViewController = nil;
-    _meSplitViewController = nil;
     _notificationsNavigationController = nil;
     _notificationsSplitViewController = nil;
     
     [self setViewControllers:[self tabViewControllers]];
     
-    if ([Feature enabled:FeatureFlagFloatingCreateButton]) {
-        [self.createButtonCoordinator addTo:self.view trailingAnchor:self.blogListSplitViewController.viewControllers[0].view.trailingAnchor bottomAnchor:self.tabBar.topAnchor];
-    }
-
     // Reset the selectedIndex to the default MySites tab.
     self.selectedIndex = WPTabMySites;
 }
@@ -436,9 +265,6 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 - (void)resetReaderTab
 {
     _readerNavigationController = nil;
-    _readerMenuViewController = nil;
-    _readerSplitViewController = nil;
-
     [self setViewControllers:[self tabViewControllers]];
 }
 
@@ -446,292 +272,79 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 
 - (MySitesCoordinator *)mySitesCoordinator
 {
-    return [[MySitesCoordinator alloc] initWithMySitesSplitViewController:self.blogListSplitViewController
-                                              mySitesNavigationController:self.blogListNavigationController
-                                                   blogListViewController:self.blogListViewController];
+    if (!_mySitesCoordinator) {
+        __weak __typeof(self) weakSelf = self;
+        
+        _mySitesCoordinator = [[MySitesCoordinator alloc] initWithMeScenePresenter: self.meScenePresenter
+                                                                 onBecomeActiveTab:^{
+            [weakSelf showMySitesTab];
+        }];
+    }
+    
+    return _mySitesCoordinator;
 }
 
 - (ReaderCoordinator *)readerCoordinator
 {
-    return [[ReaderCoordinator alloc] initWithReaderNavigationController:self.readerNavigationController
-                                               readerSplitViewController:self.readerSplitViewController
-                                                readerMenuViewController:self.readerMenuViewController];
-}
-
-- (CreateButtonCoordinator *)createButtonCoordinator
-{
-    if (!_createButtonCoordinator) {
-        __weak __typeof(self) weakSelf = self;
-        _createButtonCoordinator = [[CreateButtonCoordinator alloc] init:self newPost:^{
-            [weakSelf dismissViewControllerAnimated:true completion:nil];
-            [weakSelf showPostTab];
-        } newPage:^{
-            [weakSelf dismissViewControllerAnimated:true completion:nil];
-            Blog *blog = [weakSelf currentOrLastBlog];
-            [weakSelf showPageTabForBlog:blog];
-        }];
-    }
-    
-    return _createButtonCoordinator;
+    return [[ReaderCoordinator alloc] initWithReaderNavigationController:self.readerNavigationController];
 }
 
 #pragma mark - Navigation Helpers
 
 - (NSArray<UIViewController *> *)tabViewControllers
 {
-    
-    NSMutableArray<UIViewController *> *allViewControllers = [NSMutableArray arrayWithArray:@[self.blogListSplitViewController,
-                                                        self.readerSplitViewController,
-                                                        self.newPostViewController,
-                                                        self.meSplitViewController,
-                                                        self.notificationsSplitViewController]];
-    
-    if ([Feature enabled:FeatureFlagFloatingCreateButton]) {
-        [allViewControllers removeObject:self.newPostViewController];
+    if (self.shouldUseStaticScreens) {
+        return @[
+            self.mySitesCoordinator.rootViewController,
+            self.readerNavigationController,
+            self.notificationsNavigationController
+        ];
     }
 
-    if ([Feature enabled:FeatureFlagMeMove]) {
-        [allViewControllers removeObject:self.meSplitViewController];
-        self.meSplitViewController = nil;
-        self.meNavigationController = nil;
-        self.meViewController = nil;
-    }
-
-    return allViewControllers;
-}
-
-- (void)showTabForIndex:(NSInteger)tabIndex
-{
-    //TODO: only for FeatureFlagMeMove: this always receives a WPTabType, so we set toTabType = true
-    NSInteger newIndex = [self adjustedTabIndex:tabIndex toTabType:true];
-    [self setSelectedIndex:newIndex];
-}
-
-/// Adjusts the passed tabIndex to a new value depending on the enabled feature flags
-/// @param tabIndex The index that may need adjustment.
-/// @param toTabType Whether the new index is being converted to the WPTabType index. If true, the index should come from the tab bar.
-- (NSInteger)adjustedTabIndex:(NSInteger)tabIndex toTabType:(BOOL)toTabType {
-    //TODO: Remove this change once `floatingCreateButton` feature flag is enabled
-    NSInteger tabOffset = 0;
-    if ([Feature enabled:FeatureFlagFloatingCreateButton] && tabIndex > WPTabReader) {
-        tabOffset += 1;
-    }
-    if ([Feature enabled:FeatureFlagMeMove] && tabIndex > WPTabNewPost) {
-        tabOffset += 1;
-    }
-    return tabIndex + (toTabType ? -tabOffset : tabOffset);
+    return @[
+        self.mySitesCoordinator.rootViewController,
+        self.readerNavigationController,
+        self.notificationsSplitViewController
+    ];
 }
 
 - (void)showMySitesTab
 {
-    [self showTabForIndex:WPTabMySites];
+    [self setSelectedIndex:WPTabMySites];
 }
 
 - (void)showReaderTab
 {
-    [self showTabForIndex:WPTabReader];
-}
-
-- (void)showPostTab
-{
-    [self showPostTabWithCompletion:nil];
-}
-
-- (void)showPostTabWithCompletion:(void (^)(void))afterDismiss
-{
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    // Ignore taps on the post tab and instead show the modal.
-    if ([blogService blogCountForAllAccounts] == 0) {
-        [self switchMySitesTabToAddNewSite];
-    } else {
-        [self showPostTabAnimated:true toMedia:false blog:nil afterDismiss:afterDismiss];
-    }
-
-    [self alertQuickStartThatWriteWasTapped];
-}
-
-- (void)showPostTabForBlog:(Blog *)blog
-{
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    if ([blogService blogCountForAllAccounts] == 0) {
-        [self switchMySitesTabToAddNewSite];
-    } else {
-        [self showPostTabAnimated:YES toMedia:NO blog:blog];
-    }
-}
-// will be removed when the new IA implementation completes
-- (void)showMeTab
-{
-    [self showTabForIndex:WPTabMe];
+    [self setSelectedIndex:WPTabReader];
 }
 
 - (void)showNotificationsTab
 {
-    [self showTabForIndex:WPTabNotifications];
-}
-
-- (void)showPostTabAnimated:(BOOL)animated toMedia:(BOOL)openToMedia
-{
-    [self showPostTabAnimated:animated toMedia:openToMedia blog:nil];
-}
-
-- (void)showPostTabAnimated:(BOOL)animated toMedia:(BOOL)openToMedia blog:(Blog *)blog
-{
-    [self showPostTabAnimated:animated toMedia:openToMedia blog:blog afterDismiss:nil];
-}
-
-- (void)showPostTabAnimated:(BOOL)animated toMedia:(BOOL)openToMedia blog:(Blog *)blog afterDismiss:(void (^)(void))afterDismiss
-{
-    if (self.presentedViewController) {
-        [self dismissViewControllerAnimated:NO completion:nil];
-    }
-
-    if (!blog) {
-        blog = [self currentOrLastBlog];
-    }
-
-    EditPostViewController* editor = [[EditPostViewController alloc] initWithBlog:blog];
-    editor.modalPresentationStyle = UIModalPresentationFullScreen;
-    editor.showImmediately = !animated;
-    editor.openWithMediaPicker = openToMedia;
-    editor.afterDismiss = afterDismiss;
-    [WPAppAnalytics track:WPAnalyticsStatEditorCreatedPost withProperties:@{ @"tap_source": @"tab_bar"} withBlog:blog];
-    [self presentViewController:editor animated:NO completion:nil];
-    return;
+    [self setSelectedIndex:WPTabNotifications];
 }
 
 - (void)showReaderTabForPost:(NSNumber *)postId onBlog:(NSNumber *)blogId
 {
     [self showReaderTab];
+    UIViewController *topDetailVC = (UIViewController *)self.readerNavigationController.topViewController;
 
-    UIViewController *topDetailVC = (ReaderDetailViewController *)self.readerSplitViewController.topDetailViewController;
+    // TODO: needed?
     if ([topDetailVC isKindOfClass:[ReaderDetailViewController class]]) {
         ReaderDetailViewController *readerDetailVC = (ReaderDetailViewController *)topDetailVC;
         ReaderPost *readerPost = readerDetailVC.post;
         if ([readerPost.postID isEqual:postId] && [readerPost.siteID isEqual: blogId]) {
-             // The desired reader detail VC is already the top VC for the tab. Move along.
+         // The desired reader detail VC is already the top VC for the tab. Move along.
             return;
         }
     }
-
-    if (topDetailVC && topDetailVC.navigationController) {
-        ReaderDetailViewController *readerPostDetailVC = [ReaderDetailViewController controllerWithPostID:postId siteID:blogId isFeed:NO];
-        [topDetailVC.navigationController pushFullscreenViewController:readerPostDetailVC animated:YES];
-    }
+    
+    UIViewController *readerPostDetailVC = [ReaderDetailViewController controllerWithPostID:postId siteID:blogId isFeed:NO];
+    [self.readerNavigationController pushFullscreenViewController:readerPostDetailVC animated:YES];
 }
 
 - (void)popNotificationsTabToRoot
 {
     [self.notificationsNavigationController popToRootViewControllerAnimated:NO];
-}
-
-- (void)switchTabToPostsListForPost:(AbstractPost *)post
-{
-    UIViewController *topVC = [self.blogListSplitViewController topDetailViewController];
-    if ([topVC isKindOfClass:[PostListViewController class]]) {
-        Blog *blog = ((PostListViewController *)topVC).blog;
-        if ([post.blog.objectID isEqual:blog.objectID]) {
-            // The desired post view controller is already the top viewController for the tab.
-            // Nothing to see here.  Move along.
-            return;
-        }
-    }
-
-    [self switchMySitesTabToBlogDetailsForBlog:post.blog];
-
-    BlogDetailsViewController *blogDetailVC = (BlogDetailsViewController *)self.blogListNavigationController.topViewController;
-    if ([blogDetailVC isKindOfClass:[BlogDetailsViewController class]]) {
-        [blogDetailVC showDetailViewForSubsection:BlogDetailsSubsectionPosts];
-    }
-}
-
-- (void)switchTabToPagesListForPost:(AbstractPost *)post
-{
-    UIViewController *topVC = [self.blogListSplitViewController topDetailViewController];
-    if ([topVC isKindOfClass:[PageListViewController class]]) {
-        Blog *blog = ((PageListViewController *)topVC).blog;
-        if ([post.blog.objectID isEqual:blog.objectID]) {
-            // The desired post view controller is already the top viewController for the tab.
-            // Nothing to see here.  Move along.
-            return;
-        }
-    }
-
-    [self switchMySitesTabToBlogDetailsForBlog:post.blog];
-
-    BlogDetailsViewController *blogDetailVC = (BlogDetailsViewController *)self.blogListNavigationController.topViewController;
-    if ([blogDetailVC isKindOfClass:[BlogDetailsViewController class]]) {
-        [blogDetailVC showDetailViewForSubsection:BlogDetailsSubsectionPages];
-    }
-}
-
-- (void)switchMySitesTabToAddNewSite
-{
-    [self showTabForIndex:WPTabMySites];
-    [self.blogListViewController presentInterfaceForAddingNewSiteFrom:self.tabBar];
-}
-
-- (void)switchMySitesTabToStatsViewForBlog:(Blog *)blog
-{
-    [self switchMySitesTabToBlogDetailsForBlog:blog];
-
-    BlogDetailsViewController *blogDetailVC = (BlogDetailsViewController *)self.blogListNavigationController.topViewController;
-    if ([blogDetailVC isKindOfClass:[BlogDetailsViewController class]]) {
-        [blogDetailVC showDetailViewForSubsection:BlogDetailsSubsectionStats];
-    }
-}
-
-- (void)switchMySitesTabToMediaForBlog:(Blog *)blog
-{
-    if ([self adjustedTabIndex:self.selectedIndex toTabType:false] == WPTabMySites) {
-        UIViewController *topViewController = (BlogDetailsViewController *)self.blogListNavigationController.topViewController;
-        if ([topViewController isKindOfClass:[MediaLibraryViewController class]]) {
-            MediaLibraryViewController *mediaVC = (MediaLibraryViewController *)topViewController;
-            if (mediaVC.blog == blog) {
-                // If media is already selected for the specified blog, do nothing.
-                return;
-            }
-        }
-    }
-    
-    [self switchMySitesTabToBlogDetailsForBlog:blog];
-
-    BlogDetailsViewController *blogDetailVC = (BlogDetailsViewController *)self.blogListNavigationController.topViewController;
-    if ([blogDetailVC isKindOfClass:[BlogDetailsViewController class]]) {
-        [blogDetailVC showDetailViewForSubsection:BlogDetailsSubsectionMedia];
-    }
-}
-
-- (void)switchMySitesTabToCustomizeViewForBlog:(Blog *)blog
-{
-    [self switchMySitesTabToThemesViewForBlog:blog];
-
-    UIViewController *topVC = [self.blogListSplitViewController topDetailViewController];
-    if ([topVC isKindOfClass:[ThemeBrowserViewController class]]) {
-        ThemeBrowserViewController *themeViewController = (ThemeBrowserViewController *)topVC;
-        [themeViewController presentCustomizeForTheme:[themeViewController currentTheme]];
-    }
-}
-
-- (void)switchMySitesTabToThemesViewForBlog:(Blog *)blog
-{
-    [self switchMySitesTabToBlogDetailsForBlog:blog];
-
-    BlogDetailsViewController *blogDetailVC = (BlogDetailsViewController *)self.blogListNavigationController.topViewController;
-    if ([blogDetailVC isKindOfClass:[BlogDetailsViewController class]]) {
-        [blogDetailVC showDetailViewForSubsection:BlogDetailsSubsectionThemes];
-    }
-}
-
-- (void)switchMySitesTabToBlogDetailsForBlog:(Blog *)blog
-{
-    [self showTabForIndex:WPTabMySites];
-
-    BlogListViewController *blogListVC = self.blogListViewController;
-    self.blogListNavigationController.viewControllers = @[blogListVC];
-    [blogListVC setSelectedBlog:blog animated:NO];
 }
 
 - (void)switchNotificationsTabToNotificationSettings
@@ -742,96 +355,50 @@ static CGFloat const WPTabBarIconSize = 32.0f;
     [self.notificationsViewController showNotificationSettings];
 }
 
-- (void)switchReaderTabToSavedPosts
-{
-    [self showReaderTab];
-
-    // Unfortunately animations aren't disabled properly for this
-    // transition unless we dispatch_async.
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.readerNavigationController popToRootViewControllerAnimated:NO];
-
-        [UIView performWithoutAnimation:^{
-            [self.readerMenuViewController showSavedForLater];
-        }];
-    });
-}
-
 - (NSString *)currentlySelectedScreen
 {
     // Check which tab is currently selected
     NSString *currentlySelectedScreen = @"";
-    switch ([self adjustedTabIndex:self.selectedIndex toTabType:false]) {
+    switch (self.selectedIndex) {
         case WPTabMySites:
-            currentlySelectedScreen = @"Blog List";
+            currentlySelectedScreen = WPTabBarCurrentlySelectedScreenSites;
             break;
         case WPTabReader:
-            currentlySelectedScreen = @"Reader";
+            currentlySelectedScreen = WPTabBarCurrentlySelectedScreenReader;
             break;
         case WPTabNotifications:
-            currentlySelectedScreen = @"Notifications";
+            currentlySelectedScreen = WPTabBarCurrentlySelectedScreenNotifications;
             break;
-        case WPTabMe:
-            currentlySelectedScreen = @"Me";
         default:
             break;
     }
     return currentlySelectedScreen;
 }
 
-- (Blog *)currentlyVisibleBlog
-{
-    if ([self adjustedTabIndex:self.selectedIndex toTabType:false] != WPTabMySites) {
-        return nil;
-    }
-
-    BlogDetailsViewController *blogDetailsController = (BlogDetailsViewController *)[[self.blogListNavigationController.viewControllers wp_filter:^BOOL(id obj) {
-        return [obj isKindOfClass:[BlogDetailsViewController class]];
-    }] firstObject];
-    return blogDetailsController.blog;
-}
-
-- (Blog *)currentOrLastBlog
-{
-    Blog *blog = [self currentlyVisibleBlog];
-
-    if (blog == nil) {
-        NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-        BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-        blog = [blogService lastUsedOrFirstBlog];
-    }
-    
-    return blog;
-}
-
 #pragma mark - UITabBarControllerDelegate methods
 
 - (BOOL)tabBarController:(UITabBarController *)tabBarController shouldSelectViewController:(UIViewController *)viewController
 {
-    NSUInteger newIndex = [tabBarController.viewControllers indexOfObject:viewController];
-
-    newIndex = [self adjustedTabIndex:newIndex toTabType:false];
-
-    if (newIndex == WPTabNewPost) {
-        [self showPostTab];
-        return NO;
-    }
+    NSUInteger selectedIndex = [tabBarController.viewControllers indexOfObject:viewController];
 
     // If we're selecting a new tab...
-    if (newIndex != tabBarController.selectedIndex) {
-        switch (newIndex) {
+    if (selectedIndex != tabBarController.selectedIndex) {
+        switch (selectedIndex) {
             case WPTabMySites: {
-                [self bypassBlogListViewControllerIfNecessary];
                 break;
             }
             case WPTabReader: {
                 [self alertQuickStartThatReaderWasTapped];
                 break;
             }
+            case WPTabNotifications: {
+                [self alertQuickStartThatNotificationsWasTapped];
+                break;
+            }
             default: break;
         }
 
-        [self trackTabAccessForTabIndex:newIndex];
+        [self trackTabAccessForTabIndex:selectedIndex];
         [self alertQuickStartThatOtherTabWasTapped];
     } else {
         // If the current view controller is selected already and it's at its root then scroll to the top
@@ -847,46 +414,16 @@ static CGFloat const WPTabBarIconSize = 32.0f;
     return YES;
 }
 
-- (void)tabBarController:(UITabBarController *)tabBarController didSelectViewController:(UIViewController *)viewController
-{
-    if (![Feature enabled:FeatureFlagMeMove]) {
-        [self updateMeNotificationIcon];
-    }
-}
-
-- (void)bypassBlogListViewControllerIfNecessary
-{
-    // If the user has one blog then we don't want to present them with the main "My Sites"
-    // screen where they can see all their blogs. In the case of only one blog just show
-    // the main blog details screen
-    UINavigationController *navController = (UINavigationController *)[self.blogListSplitViewController.viewControllers firstObject];
-    BlogListViewController *blogListViewController = (BlogListViewController *)[navController.viewControllers firstObject];
-
-    if ([blogListViewController shouldBypassBlogListViewControllerWhenSelectedFromTabBar]) {
-        if ([navController.visibleViewController isKindOfClass:[blogListViewController class]]) {
-            [blogListViewController bypassBlogListViewController];
-        }
-    }
-}
-
 - (void)showNotificationsTabForNoteWithID:(NSString *)notificationID
 {
-    [self showTabForIndex:WPTabNotifications];
+    [self setSelectedIndex:WPTabNotifications];
     [self.notificationsViewController showDetailsForNotificationWithID:notificationID];
-}
-
-- (BOOL)isNavigatingMySitesTab
-{
-    return (self.selectedIndex == WPTabMySites && [self.blogListViewController.navigationController.viewControllers count] > 1);
 }
 
 #pragma mark - Zendesk Notifications
 
 - (void)updateIconIndicators:(NSNotification *)notification
 {
-    if (![Feature enabled:FeatureFlagMeMove]) {
-        [self updateMeNotificationIcon];
-    }
     [self updateNotificationBadgeVisibility];
 }
 
@@ -896,9 +433,10 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 {
     if (notification.object == nil) {
         [self.readerNavigationController popToRootViewControllerAnimated:NO];
-        [self.meNavigationController popToRootViewControllerAnimated:NO];
         [self.notificationsNavigationController popToRootViewControllerAnimated:NO];
     }
+
+    self.readerNavigationController = nil;
 }
 
 - (void)signinDidFinish:(NSNotification *)notification
@@ -910,10 +448,17 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 
 - (void)updateNotificationBadgeVisibility
 {
+    UITabBarItem *notificationsTabBarItem = self.notificationsNavigationController.tabBarItem;
+    
+    if (self.shouldUseStaticScreens) {
+        notificationsTabBarItem.image = self.notificationsTabBarImage;
+        notificationsTabBarItem.accessibilityLabel = NSLocalizedString(@"Notifications", @"Notifications tab bar item accessibility label");
+        return;
+    }
+
     // Discount Zendesk unread notifications when determining if we need to show the notificationsTabBarImageUnread.
     NSInteger count = [[UIApplication sharedApplication] applicationIconBadgeNumber] - [ZendeskUtils unreadNotificationsCount];
-    UITabBarItem *notificationsTabBarItem = self.notificationsNavigationController.tabBarItem;
-    if (count > 0) {
+    if (count > 0 || ![self welcomeNotificationSeen]) {
         notificationsTabBarItem.image = self.notificationsTabBarImageUnread;
         notificationsTabBarItem.accessibilityLabel = NSLocalizedString(@"Notifications Unread", @"Notifications tab bar item accessibility label, unread notifications state");
     } else {
@@ -921,52 +466,40 @@ static CGFloat const WPTabBarIconSize = 32.0f;
         notificationsTabBarItem.accessibilityLabel = NSLocalizedString(@"Notifications", @"Notifications tab bar item accessibility label");
     }
 
-    if( UIApplication.sharedApplication.isCreatingScreenshots ) {
+    if (UIApplication.sharedApplication.isCreatingScreenshots) {
         notificationsTabBarItem.image = self.notificationsTabBarImage;
         notificationsTabBarItem.accessibilityLabel = NSLocalizedString(@"Notifications", @"Notifications tab bar item accessibility label");
     }
+    
 }
 
-- (void) showReaderBadge:(NSNotification *)notification
+- (BOOL)welcomeNotificationSeen
 {
-    UIImage *readerTabBarImage = [[UIImage imageNamed:@"icon-tab-reader-unread"] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
-    self.readerNavigationController.tabBarItem.image = readerTabBarImage;
-
-    if( UIApplication.sharedApplication.isCreatingScreenshots ) {
-        [self hideReaderBadge:nil];
-    }
-}
-
-- (void) hideReaderBadge:(NSNotification *)notification
-{
-    UIImage *readerTabBarImage = [UIImage imageNamed:@"icon-tab-reader"];
-    self.readerNavigationController.tabBarItem.image = readerTabBarImage;
-}
-
-- (void)updateMeNotificationIcon
-{
-    UITabBarItem *meTabBarItem = self.tabBar.items[[self adjustedTabIndex:WPTabMe toTabType:true]];
-
-    if ([ZendeskUtils showSupportNotificationIndicator]) {
-        meTabBarItem.image = self.meTabBarImageUnreadUnselected;
-        meTabBarItem.selectedImage = self.meTabBarImageUnreadSelected;
-    } else {
-        meTabBarItem.image = self.meTabBarImage;
-        meTabBarItem.selectedImage = self.meTabBarImage;
-    }
-
-    if( UIApplication.sharedApplication.isCreatingScreenshots ) {
-        meTabBarItem.image = self.meTabBarImage;
-        meTabBarItem.selectedImage = self.meTabBarImage;
-    }
+    NSUserDefaults *standardUserDefaults = [UserPersistentStoreFactory userDefaultsInstance];
+    NSString *welcomeNotificationSeenKey = @"welcomeNotificationSeen";
+    return [standardUserDefaults boolForKey: welcomeNotificationSeenKey];
 }
 
 #pragma mark - NSObject(NSKeyValueObserving) Helpers
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
 {
-    if ([keyPath isEqualToString:WPApplicationIconBadgeNumberKeyPath]) {
+    if (object == self.tabBar && [keyPath isEqualToString:WPTabBarFrameKeyPath]) {
+        [self notifyOfTabBarHeightChangedIfNeeded];
+    }
+
+    if (object == [UIApplication sharedApplication] && [keyPath isEqualToString:WPApplicationIconBadgeNumberKeyPath]) {
         [self updateNotificationBadgeVisibility];
+    }
+}
+
+- (void)notifyOfTabBarHeightChangedIfNeeded
+{
+    CGFloat newTabBarHeight = self.tabBar.frame.size.height;
+    if (newTabBarHeight != self.tabBarHeight) {
+        self.tabBarHeight = newTabBarHeight;
+        [[NSNotificationCenter defaultCenter] postNotificationName:WPTabBarHeightChangedNotification
+                                                            object:nil];
     }
 }
 
@@ -982,14 +515,17 @@ static CGFloat const WPTabBarIconSize = 32.0f;
         return nil;
     }
 
-    return @[
-             [UIKeyCommand keyCommandWithInput:@"N" modifierFlags:UIKeyModifierCommand action:@selector(showPostTab) discoverabilityTitle:NSLocalizedString(@"New Post", @"The accessibility value of the post tab.")],
-             [UIKeyCommand keyCommandWithInput:@"1" modifierFlags:UIKeyModifierCommand action:@selector(showMySitesTab) discoverabilityTitle:NSLocalizedString(@"My Sites", @"The accessibility value of the my sites tab.")],
-             [UIKeyCommand keyCommandWithInput:@"2" modifierFlags:UIKeyModifierCommand action:@selector(showReaderTab) discoverabilityTitle:NSLocalizedString(@"Reader", @"The accessibility value of the reader tab.")],
-             // will be removed when the new IA implementation completes
-             [UIKeyCommand keyCommandWithInput:@"3" modifierFlags:UIKeyModifierCommand action:@selector(showMeTab) discoverabilityTitle:NSLocalizedString(@"Me", @"The accessibility value of the me tab.")],
-             [UIKeyCommand keyCommandWithInput:@"4" modifierFlags:UIKeyModifierCommand action:@selector(showNotificationsTab) discoverabilityTitle:NSLocalizedString(@"Notifications", @"Notifications tab bar item accessibility label")],
-             ];
+    UIKeyCommand *showMySitesTabCommand = [UIKeyCommand keyCommandWithInput:@"1" modifierFlags:UIKeyModifierCommand action:@selector(showMySitesTab)];
+    showMySitesTabCommand.discoverabilityTitle = NSLocalizedString(@"My Site", @"The accessibility value of the my site tab.");
+    
+    UIKeyCommand *showReaderTabCommand = [UIKeyCommand keyCommandWithInput:@"2" modifierFlags:UIKeyModifierCommand action:@selector(showReaderTab)];
+    showMySitesTabCommand.discoverabilityTitle = NSLocalizedString(@"Reader", @"The accessibility value of the reader tab.");
+    
+    UIKeyCommand *showNotificationsTabCommand = [UIKeyCommand keyCommandWithInput:@"4" modifierFlags:UIKeyModifierCommand action:@selector(showNotificationsTab)];
+    showMySitesTabCommand.discoverabilityTitle = NSLocalizedString(@"Notifications", @"Notifications tab bar item accessibility label");
+    
+    
+    return @[showMySitesTabCommand, showReaderTabCommand, showNotificationsTabCommand];
 }
 
 #pragma mark - Handling Layout
@@ -1013,20 +549,6 @@ static CGFloat const WPTabBarIconSize = 32.0f;
     [super viewDidLayoutSubviews];
 }
 
-- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
-{
-    [super traitCollectionDidChange:previousTraitCollection];
-
-    [self updateWriteButtonAppearance];
-    
-    [self.createButtonCoordinator presentingTraitCollectionDidChange:previousTraitCollection];
-}
-
-- (void)willTransitionToTraitCollection:(UITraitCollection *)newCollection withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
-{
-    [super willTransitionToTraitCollection:newCollection withTransitionCoordinator:coordinator];
-}
-
 #pragma mark - UIViewControllerTransitioningDelegate
 
 - (UIPresentationController *)presentationControllerForPresentedViewController:(UIViewController *)presented presentingViewController:(UIViewController *)presenting sourceViewController:(UIViewController *)source
@@ -1038,4 +560,5 @@ static CGFloat const WPTabBarIconSize = 32.0f;
 
     return nil;
 }
+
 @end

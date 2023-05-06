@@ -13,9 +13,14 @@ msgstr ""
 "Last-Translator: \n"
 "Language-Team: \n"
 
+#. translators: The application name in the Apple App Store. Please keep the brand name ('WordPress') verbatim. Limit to 30 characters including spaces and punctuation!
+msgctxt "app_store_name"
+msgid "WordPress – Website Builder"
+msgstr ""
+
 #. translators: Subtitle to be displayed below the application name in the Apple App Store. Limit to 30 characters including spaces and commas!
 msgctxt "app_store_subtitle"
-msgid "Manage your website anywhere"
+msgid "Design a site, build a blog"
 msgstr ""
 
 #. translators: Multi-paragraph text used to display in the Apple App Store.
@@ -29,22 +34,20 @@ msgid ""
 "\n"
 "WordPress for iOS supports WordPress.com and self-hosted WordPress.org sites running WordPress 4.0 or higher.\n"
 "\n"
-"Need help with the app? Visit the forums at https://ios.forums.wordpress.org/ or tweet us @WordPressiOS.\n\n"
+"Need help with the app? Visit the forums at https://wordpress.org/support/forum/mobile/ or tweet us @WordPressiOS.\n"
+"\n"
+"View the Privacy Notice for California Users at https://automattic.com/privacy/#california-consumer-privacy-act-ccpa.\n"
 msgstr ""
 
 #. translators: Keywords used in the App Store search engine to find the app.
 #. Delimit with a comma between each keyword. Limit to 100 characters including spaces and commas.
 msgctxt "app_store_keywords"
-msgid "social,network,notes,jetpack,photos,writing,geotagging,media,blog,wordpress,website,blogging,design\n"
+msgid "blogger,writing,blogging,web,maker,online,store,business,make,create,write,blogs"
 msgstr ""
 
-msgctxt "v14.3-whats-new"
+msgctxt "v22.3-whats-new"
 msgid ""
-"- There are two new blocks available! Welcome, Button and Group blocks.\n"
-"- A few other blocks have improvements: You can change image sizes in image blocks and use upload options in Gallery blocks. We also took care of a text-wrapping issue in Shortcode blocks that would cut off part of your content.\n"
-"- We also made some enhancements to the general block experience. You’ll see a new toolbar floating above the block you’re editing to make navigating blocks, especially complex ones, easier. There’s also scroll support in the block picker and in block settings.\n"
-"- Finally, we fixed a few bugs. Adding emoji to a post title no longer adds strong HTML elements to the post title, and the alignment of paragraph blocks is now respected when you split the paragraph or read the post’s HTML content.\n"
-"- We also adjusted the weekday symbols in the calendar depending on your regional settings, and added Quick Action buttons to the Site Details to take you straight to the most frequently used parts of a site.\n"
+"Breaking news—VideoPress blocks are now enabled for Simple WordPress.com websites, so you can host and embed high-quality videos to your heart’s content. We hope those videos include cats.\n"
 msgstr ""
 
 #. translators: This is a standard chunk of text used to tell a user what's new with a release when nothing major has changed.
@@ -75,40 +78,63 @@ msgstr ""
 #. No specified characters limit here, but try to keep as short as the source one.
 msgctxt "app_store_screenshot-1"
 msgid ""
-"Enjoy your\n"
-"favorite sites\n"
+"The world’s most\n"
+"popular website\n"
+"builder\n"
 msgstr ""
 
 #. translators: This is a promo message that will be attached on top of the second screenshot in the App Store.
 #. No specified characters limit here, but try to keep as short as the source one.
 msgctxt "app_store_screenshot-2"
 msgid ""
-"Get notified\n"
-"in real-time\n"
+"Create a site or\n"
+"start a blog\n"
 msgstr ""
 
 #. translators: This is a promo message that will be attached on top of the third screenshot in the App Store.
 #. No specified characters limit here, but try to keep as short as the source one.
 msgctxt "app_store_screenshot-3"
 msgid ""
-"Manage your site\n"
-"everywhere you go\n"
+"Discover\n"
+"new reads\n"
 msgstr ""
 
 #. translators: This is a promo message that will be attached on top of the fourth screenshot in the App Store.
 #. No specified characters limit here, but try to keep as short as the source one.
 msgctxt "app_store_screenshot-4"
 msgid ""
-"Share your ideas\n"
-"with the world\n"
+"Build an\n"
+"audience\n"
 msgstr ""
 
 #. translators: This is a promo message that will be attached on top of the fifth screenshot in the App Store.
 #. No specified characters limit here, but try to keep as short as the source one.
 msgctxt "app_store_screenshot-5"
 msgid ""
-"All the stats\n"
-"in your hand\n"
+"Keep tabs on\n"
+"your site\n"
+msgstr ""
+
+#. translators: This is a promo message that will be attached on top of the fifth screenshot in the App Store.
+#. No specified characters limit here, but try to keep as short as the source one.
+msgctxt "app_store_screenshot-6"
+msgid ""
+"Reply in\n"
+"real time\n"
+msgstr ""
+
+#. translators: This is a promo message that will be attached on top of the fifth screenshot in the App Store.
+#. No specified characters limit here, but try to keep as short as the source one.
+msgctxt "app_store_screenshot-7"
+msgid ""
+"Upload\n"
+"on the go\n"
+msgstr ""
+
+#. translators: This is a promo message that will be attached on top of the fifth screenshot in the App Store.
+#. No specified characters limit here, but try to keep as short as the source one.
+msgctxt "app_store_screenshot-8"
+msgid "Write without compromises"
 msgstr ""
 
 #. translators: This is a promo message that will be attached on top of an enhanced screenshot in the App Store.

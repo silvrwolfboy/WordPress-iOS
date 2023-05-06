@@ -11,7 +11,28 @@ import AutomatticTracks
             return true
         }
 
-        // 3. let's see if it's our wpcom scheme
+        if QRLoginCoordinator.didHandle(url: url) {
+            return true
+        }
+
+        if UniversalLinkRouter.shared.canHandle(url: url) {
+            UniversalLinkRouter.shared.handle(url: url, shouldTrack: true)
+            return true
+        }
+
+        /// WordPress only. Handle deeplink from JP that requests data export.
+        let wordPressExportRouter = MigrationDeepLinkRouter(urlForScheme: URL(string: AppScheme.wordpressMigrationV1.rawValue),
+                                                            routes: [WordPressExportRoute()])
+        if AppConfiguration.isWordPress,
+           wordPressExportRouter.canHandle(url: url) {
+            wordPressExportRouter.handle(url: url)
+            return true
+        }
+
+        if url.scheme == JetpackNotificationMigrationService.wordPressScheme {
+            return JetpackNotificationMigrationService.shared.handleNotificationMigrationOnWordPress()
+        }
+
         guard url.scheme == WPComScheme else {
             return false
         }
@@ -20,6 +41,8 @@ import AutomatticTracks
         switch url.host {
         case "newpost":
             return handleNewPost(url: url)
+        case "newpage":
+            return handleNewPage(url: url)
         case "magic-login":
             return handleMagicLogin(url: url)
         case "viewpost":
@@ -45,13 +68,17 @@ import AutomatticTracks
 
     private func handleMagicLogin(url: URL) -> Bool {
         DDLogInfo("App launched with authentication link")
-        let allowWordPressComAuth = !AccountHelper.isDotcomAvailable()
+
+        guard AccountHelper.noWordPressDotComAccount || url.isJetpackConnect else {
+            DDLogInfo("The user clicked on a login or signup magic link when already logged into a WPCom account.  Since this is not a Jetpack connection attempt we're cancelling the operation.")
+            return false
+        }
+
         guard let rvc = window?.rootViewController else {
             return false
         }
-        return WordPressAuthenticator.openAuthenticationURL(url,
-                                                            allowWordPressComAuth: allowWordPressComAuth,
-                                                            fromRootViewController: rvc)
+
+        return WordPressAuthenticator.openAuthenticationURL(url, fromRootViewController: rvc)
     }
 
     private func handleViewPost(url: URL) -> Bool {
@@ -61,17 +88,26 @@ import AutomatticTracks
             return false
         }
 
-        WPTabBarController.sharedInstance()?.showReaderTab(forPost: NSNumber(value: postId), onBlog: NSNumber(value: blogId))
+        RootViewCoordinator.sharedPresenter.showReaderTab(forPost: NSNumber(value: postId), onBlog: NSNumber(value: blogId))
 
         return true
     }
 
     private func handleViewStats(url: URL) -> Bool {
-        let blogService = BlogService(managedObjectContext: ContextManager.sharedInstance().mainContext)
 
         guard let params = url.queryItems,
             let siteId = params.intValue(of: "siteId"),
-            let blog = blogService.blog(byBlogId: NSNumber(value: siteId)) else {
+            let blog = try? Blog.lookup(withID: siteId, in: ContextManager.shared.mainContext) else {
+            return false
+        }
+
+        guard JetpackFeaturesRemovalCoordinator.jetpackFeaturesEnabled() else {
+            // Display overlay
+            RootViewCoordinator.sharedPresenter.mySitesCoordinator.displayJetpackOverlayForDisabledEntryPoint()
+
+            // Track incorrect access
+            let properties = ["calling_function": "deep_link", "url": url.absoluteString]
+            WPAnalytics.track(.jetpackFeatureIncorrectlyAccessed, properties: properties)
             return false
         }
 
@@ -86,14 +122,14 @@ import AutomatticTracks
             // so the Stats view displays the correct stats.
             SiteStatsInformation.sharedInstance.siteID = currentSiteID
 
-            WPTabBarController.sharedInstance()?.dismiss(animated: true, completion: nil)
+            RootViewCoordinator.sharedPresenter.rootViewController.dismiss(animated: true, completion: nil)
         }
 
         let navController = UINavigationController(rootViewController: statsViewController)
         navController.modalPresentationStyle = .currentContext
         navController.navigationBar.isTranslucent = false
 
-        WPTabBarController.sharedInstance()?.present(navController, animated: true, completion: nil)
+        RootViewCoordinator.sharedPresenter.rootViewController.present(navController, animated: true, completion: nil)
 
         return true
     }
@@ -105,8 +141,8 @@ import AutomatticTracks
             return false
         }
 
-        if debugKey == ApiCredentials.debuggingKey(), debugType == "force_crash" {
-            CrashLogging.crash()
+        if debugKey == ApiCredentials.debuggingKey, debugType == "force_crash" {
+            WordPressAppDelegate.crashLogging?.crash()
         }
 
         return true
@@ -130,15 +166,14 @@ import AutomatticTracks
         let tags = params.value(of: NewPostKey.tags)
 
         let context = ContextManager.sharedInstance().mainContext
-        let blogService = BlogService(managedObjectContext: context)
-        guard let blog = blogService.lastUsedOrFirstBlog() else {
+        guard let blog = Blog.lastUsedOrFirst(in: context) else {
             return false
         }
 
-        // Should more formats be accepted be accepted in the future, this line would have to be expanded to accomodate it.
+        // Should more formats be accepted in the future, this line would have to be expanded to accomodate it.
         let contentEscaped = contentRaw.escapeHtmlNamedEntities()
 
-        let post = PostService(managedObjectContext: context).createDraftPost(for: blog)
+        let post = blog.createDraftPost()
         post.postTitle = title
         post.content = contentEscaped
         post.tags = tags
@@ -146,12 +181,40 @@ import AutomatticTracks
         let postVC = EditPostViewController(post: post)
         postVC.modalPresentationStyle = .fullScreen
 
-        WPTabBarController.sharedInstance()?.present(postVC, animated: true, completion: nil)
+        RootViewCoordinator.sharedPresenter.rootViewController.present(postVC, animated: true, completion: nil)
 
-        WPAppAnalytics.track(.editorCreatedPost, withProperties: ["tap_source": "url_scheme"])
+        WPAppAnalytics.track(.editorCreatedPost, withProperties: [WPAppAnalyticsKeyTapSource: "url_scheme", WPAppAnalyticsKeyPostType: "post"])
 
         return true
     }
+
+    /// Handle a call of wordpress://newpage?…
+    ///
+    /// - Parameter url: URL of the request
+    /// - Returns: true if the url was handled
+    /// - Note: **url** must contain param for `content` at minimum. Also supports `title`. Currently `content` is assumed to be
+    ///         text. May support other formats, such as HTML or Markdown in the future.
+    private func handleNewPage(url: URL) -> Bool {
+        guard let params = url.queryItems,
+            let contentRaw = params.value(of: NewPostKey.content) else {
+                return false
+        }
+
+        let title = params.value(of: NewPostKey.title)
+
+        let context = ContextManager.sharedInstance().mainContext
+        guard let blog = Blog.lastUsedOrFirst(in: context) else {
+            return false
+        }
+
+        // Should more formats be accepted be accepted in the future, this line would have to be expanded to accomodate it.
+        let contentEscaped = contentRaw.escapeHtmlNamedEntities()
+
+        RootViewCoordinator.sharedPresenter.showPageEditor(blog: blog, title: title, content: contentEscaped, source: "url_scheme")
+
+        return true
+    }
+
 
     private enum NewPostKey {
         static let title = "title"

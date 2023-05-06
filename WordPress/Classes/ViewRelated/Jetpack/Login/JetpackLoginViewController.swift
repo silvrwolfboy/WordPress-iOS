@@ -27,19 +27,10 @@ class JetpackLoginViewController: UIViewController {
     @IBOutlet fileprivate weak var jetpackImage: UIImageView!
     @IBOutlet fileprivate weak var descriptionLabel: UILabel!
     @IBOutlet fileprivate weak var signinButton: WPNUXMainButton!
+    @IBOutlet fileprivate weak var connectUserButton: NUXButton!
     @IBOutlet fileprivate weak var installJetpackButton: WPNUXMainButton!
     @IBOutlet private var tacButton: UIButton!
     @IBOutlet private var faqButton: UIButton!
-
-    /// Returns true if the blog has the proper version of Jetpack installed,
-    /// otherwise false
-    ///
-    fileprivate var hasJetpack: Bool {
-        guard let jetpack = blog.jetpack else {
-            return false
-        }
-        return (jetpack.isConnected && jetpack.isUpdatedToRequiredVersion)
-    }
 
     // MARK: - Initializers
 
@@ -60,7 +51,7 @@ class JetpackLoginViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .neutral(.shade5)
+        WPStyleGuide.configureColors(view: view, tableView: nil)
         setupControls()
     }
 
@@ -78,7 +69,7 @@ class JetpackLoginViewController: UIViewController {
         toggleHidingImageView(for: traitCollection)
 
         descriptionLabel.font = WPStyleGuide.fontForTextStyle(.body)
-        descriptionLabel.textColor = .neutral(.shade70)
+        descriptionLabel.textColor = .text
 
         tacButton.titleLabel?.numberOfLines = 0
 
@@ -121,32 +112,40 @@ class JetpackLoginViewController: UIViewController {
     // MARK: - UI Helpers
 
     func updateMessageAndButton() {
-        guard let jetPack = blog.jetpack else {
+        guard let jetpack = blog.jetpack else {
             return
         }
 
         var message: String
 
-        if jetPack.isConnected {
-            message = jetPack.isUpdatedToRequiredVersion ? Constants.Jetpack.isUpdated : Constants.Jetpack.updateRequired
+        if jetpack.isSiteConnection {
+            message = promptType.connectMessage
+        } else if jetpack.isConnected {
+            message = jetpack.isUpdatedToRequiredVersion ? Constants.Jetpack.isUpdated : Constants.Jetpack.updateRequired
         } else {
-            message = promptType.message
+            message = promptType.installMessage
         }
+
         descriptionLabel.text = message
         descriptionLabel.sizeToFit()
 
         installJetpackButton.setTitle(Constants.Buttons.jetpackInstallTitle, for: .normal)
-        installJetpackButton.isHidden = hasJetpack
+        installJetpackButton.isHidden = blog.hasJetpack
         installJetpackButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: 20)
 
+        connectUserButton.setTitle(Constants.Buttons.connectUserTitle, for: .normal)
+        connectUserButton.isHidden = !(blog.hasJetpack && jetpack.isSiteConnection)
+        connectUserButton.titleLabel?.numberOfLines = 2
+        connectUserButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: 20)
+
         signinButton.setTitle(Constants.Buttons.loginTitle, for: .normal)
-        signinButton.isHidden = !hasJetpack
+        signinButton.isHidden = !(blog.hasJetpack && !jetpack.isSiteConnection)
 
         let paragraph = NSMutableParagraphStyle(minLineHeight: WPStyleGuide.fontSizeForTextStyle(.footnote),
                                                 lineBreakMode: .byWordWrapping,
                                                 alignment: .center)
         let attributes: [NSAttributedString.Key: Any] = [.font: WPStyleGuide.fontForTextStyle(.footnote),
-                                                         .foregroundColor: UIColor.neutral(.shade70),
+                                                         .foregroundColor: UIColor.textSubtle,
                                                          .paragraphStyle: paragraph]
         let attributedTitle = NSMutableAttributedString(string: Constants.Buttons.termsAndConditionsTitle,
                                                         attributes: attributes)
@@ -178,7 +177,7 @@ class JetpackLoginViewController: UIViewController {
 
     fileprivate func signIn() {
         observeLoginNotifications(true)
-        WordPressAuthenticator.showLoginForJustWPCom(from: self, xmlrpc: blog.xmlrpc, username: blog.username, connectedEmail: blog.jetpack?.connectedEmail)
+        WordPressAuthenticator.showLoginForJustWPCom(from: self, jetpackLogin: true, connectedEmail: blog.jetpack?.connectedEmail)
     }
 
     fileprivate func trackStat(_ stat: WPAnalyticsStat, blog: Blog? = nil) {
@@ -202,7 +201,7 @@ class JetpackLoginViewController: UIViewController {
             return
         }
 
-        let webviewViewController = WebViewControllerFactory.controller(url: url)
+        let webviewViewController = WebViewControllerFactory.controller(url: url, source: "jetpack_login")
         let navigationViewController = UINavigationController(rootViewController: webviewViewController)
         present(navigationViewController, animated: true, completion: nil)
     }
@@ -220,9 +219,7 @@ class JetpackLoginViewController: UIViewController {
 
     private func openJetpackRemoteInstall() {
         trackStat(.selectedInstallJetpack)
-        let controller = JetpackRemoteInstallViewController(blog: blog,
-                                                            delegate: self,
-                                                            promptType: promptType)
+        let controller = JetpackRemoteInstallViewController(blog: blog, delegate: self)
         let navController = UINavigationController(rootViewController: controller)
         navController.modalPresentationStyle = .fullScreen
         present(navController, animated: true)
@@ -236,6 +233,10 @@ class JetpackLoginViewController: UIViewController {
 
     @IBAction func didTouchInstallJetpackButton(_ sender: Any) {
         openJetpackRemoteInstall()
+    }
+
+    @IBAction func didTouchConnectUserAccountButton(_ sender: Any) {
+        openInstallJetpackURL()
     }
 
     @IBAction func didTouchTacButton(_ sender: Any) {
@@ -287,7 +288,7 @@ public enum JetpackLoginPromptType {
         }
     }
 
-    var message: String {
+    var installMessage: String {
         switch self {
         case .stats:
             return NSLocalizedString("To use stats on your site, you'll need to install the Jetpack plugin.",
@@ -295,6 +296,19 @@ public enum JetpackLoginPromptType {
         case .notifications:
             return NSLocalizedString("To get helpful notifications on your phone from your WordPress site, you'll need to install the Jetpack plugin.",
                                         comment: "Message asking the user if they want to set up Jetpack from notifications")
+        }
+    }
+
+    var connectMessage: String {
+        switch self {
+        case .stats:
+            return NSLocalizedString("jetpack.install.connectUser.stats.description",
+                                     value: "To use stats on your site, you'll need to connect the Jetpack plugin to your user account.",
+                                     comment: "Message asking the user if they want to set up Jetpack from stats by connecting their user account")
+        case .notifications:
+            return NSLocalizedString("jetpack.install.connectUser.notifications.description",
+                                     value: "To get helpful notifications on your phone from your WordPress site, you'll need to connect to your user account.",
+                                     comment: "Message asking the user if they want to set up Jetpack from notifications")
         }
     }
 }
@@ -321,6 +335,7 @@ private enum Constants {
         static let faqTitle = NSLocalizedString("Jetpack FAQ", comment: "Title of the button which opens the Jetpack FAQ page.")
         static let jetpackInstallTitle = NSLocalizedString("Install Jetpack", comment: "Title of a button for Jetpack Installation.")
         static let loginTitle = NSLocalizedString("Log in", comment: "Title of a button for signing in.")
+        static let connectUserTitle = NSLocalizedString("jetpack.install.connectUser.button.title", value: "Connect your user account", comment: "Title of a button for connecting user account to Jetpack.")
     }
 
     enum Jetpack {

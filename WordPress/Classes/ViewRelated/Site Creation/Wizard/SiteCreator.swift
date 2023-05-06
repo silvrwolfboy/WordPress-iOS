@@ -1,5 +1,6 @@
 
 import Foundation
+import WordPressKit
 
 extension DomainSuggestion {
     var subdomain: String {
@@ -16,8 +17,6 @@ extension DomainSuggestion {
 enum SiteCreationRequestAssemblyError: Error {
     case invalidSegmentIdentifier
     case invalidVerticalIdentifier
-    case invalidDomain
-    case invalidSiteInformation
 }
 
 // MARK: - SiteCreator
@@ -26,45 +25,59 @@ enum SiteCreationRequestAssemblyError: Error {
 final class SiteCreator {
 
     // MARK: Properties
-
     var segment: SiteSegment?
-
-    var vertical: SiteVertical?
-
+    var design: RemoteSiteDesign?
+    var vertical: SiteIntentVertical?
     var information: SiteInformation?
-
     var address: DomainSuggestion?
 
     /// Generates the final object that will be posted to the backend
     ///
     /// - Returns: an Encodable object
     ///
-    func build() throws -> SiteCreationRequest {
-
-        guard let segmentIdentifier = segment?.identifier else {
-            throw SiteCreationRequestAssemblyError.invalidSegmentIdentifier
-        }
-
-        let verticalIdentifier = vertical?.identifier.description
-
-        guard let domainSuggestion = address else {
-            throw SiteCreationRequestAssemblyError.invalidDomain
-        }
-        let siteName = domainSuggestion.isWordPress ? domainSuggestion.subdomain : domainSuggestion.domainName
-
-        guard let siteInformation = information else {
-            throw SiteCreationRequestAssemblyError.invalidSiteInformation
-        }
+    func build() -> SiteCreationRequest {
 
         let request = SiteCreationRequest(
-            segmentIdentifier: segmentIdentifier,
-            verticalIdentifier: verticalIdentifier,
-            title: siteInformation.title,
-            tagline: siteInformation.tagLine,
-            siteURLString: siteName,
-            isPublic: true
+            segmentIdentifier: segment?.identifier,
+            siteDesign: design?.slug ?? Strings.defaultDesignSlug,
+            verticalIdentifier: vertical?.slug,
+            title: information?.title ?? "",
+            tagline: information?.tagLine ?? "",
+            siteURLString: siteURLString,
+            isPublic: true,
+            siteCreationFlow: address == nil ? Strings.siteCreationFlowForNoAddress : nil,
+            findAvailableURL: !(address?.isFree ?? false)
         )
-
         return request
+    }
+
+    var hasSiteTitle: Bool {
+        information?.title != nil
+    }
+
+    /// Checks if the Domain Purchasing Feature Flag and AB Experiment are enabled
+    var domainPurchasingEnabled: Bool {
+        FeatureFlag.siteCreationDomainPurchasing.enabled && ABTest.siteCreationDomainPurchasing.isTreatmentVariation
+    }
+
+    /// Flag indicating whether the domain checkout flow should appear or not.
+    var shouldShowDomainCheckout: Bool {
+        domainPurchasingEnabled && !(address?.isFree ?? false)
+    }
+
+    /// Returns the domain suggestion if there's one,
+    /// - otherwise a site name if there's one,
+    /// - otherwise an empty string.
+    private var siteURLString: String {
+
+        guard let domainSuggestion = address else {
+            return information?.title ?? ""
+        }
+        return domainSuggestion.isWordPress ? domainSuggestion.subdomain : domainSuggestion.domainName
+    }
+
+    private enum Strings {
+        static let defaultDesignSlug = "default"
+        static let siteCreationFlowForNoAddress = "with-design-picker"
     }
 }

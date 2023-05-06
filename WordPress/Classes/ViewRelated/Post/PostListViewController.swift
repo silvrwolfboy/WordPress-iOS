@@ -2,6 +2,7 @@ import Foundation
 import CocoaLumberjack
 import WordPressShared
 import Gridicons
+import UIKit
 
 // FIXME: comparison operators with optionals were removed from the Swift Standard Libary.
 // Consider refactoring the code to use the non-optional operators.
@@ -55,7 +56,7 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
     @IBOutlet weak var filterTabBarBottomConstraint: NSLayoutConstraint!
     @IBOutlet weak var tableViewTopConstraint: NSLayoutConstraint!
 
-    private var database: KeyValueDatabase = UserDefaults.standard
+    private var database: UserPersistentRepository = UserPersistentStoreFactory.instance()
 
     private lazy var _tableViewHandler: PostListTableViewHandler = {
         let tableViewHandler = PostListTableViewHandler(tableView: tableView)
@@ -74,7 +75,7 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
     }
 
     private var postViewIcon: UIImage? {
-        return isCompact ? UIImage(named: "icon-post-view-card") : Gridicon.iconOfType(.listUnordered)
+        return isCompact ? UIImage(named: "icon-post-view-card") : .gridicon(.listUnordered)
     }
 
     private lazy var postActionSheet: PostActionSheet = {
@@ -96,6 +97,9 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
         }
     }
 
+    /// If set, when the post list appear it will show the tab for this status
+    var initialFilterWithPostStatus: BasePost.Status?
+
     // MARK: - Convenience constructors
 
     @objc class func controllerWithBlog(_ blog: Blog) -> PostListViewController {
@@ -106,6 +110,15 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
         controller.restorationClass = self
 
         return controller
+    }
+
+    static func showForBlog(_ blog: Blog, from sourceController: UIViewController, withPostStatus postStatus: BasePost.Status? = nil) {
+        let controller = PostListViewController.controllerWithBlog(blog)
+        controller.navigationItem.largeTitleDisplayMode = .never
+        controller.initialFilterWithPostStatus = postStatus
+        sourceController.navigationController?.pushViewController(controller, animated: true)
+
+        QuickStartTourGuide.shared.visited(.blogDetailNavigation)
     }
 
     // MARK: - UIViewControllerRestoration
@@ -153,17 +166,69 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        title = NSLocalizedString("Blog Posts", comment: "Title of the screen showing the list of posts for a blog.")
+        title = NSLocalizedString("Posts", comment: "Title of the screen showing the list of posts for a blog.")
 
-        configureCompactOrDefault()
         configureFilterBarTopConstraint()
         updateGhostableTableViewOptions()
 
         configureNavigationButtons()
+
+        configureInitialFilterIfNeeded()
+        listenForAppComingToForeground()
+
+        createButtonCoordinator.add(to: view, trailingAnchor: view.safeAreaLayoutGuide.trailingAnchor, bottomAnchor: view.safeAreaLayoutGuide.bottomAnchor)
+    }
+
+    private lazy var createButtonCoordinator: CreateButtonCoordinator = {
+        var actions: [ActionSheetItem] = [
+            PostAction(handler: { [weak self] in
+                    self?.dismiss(animated: false, completion: nil)
+                    self?.createPost()
+            }, source: Constants.source)
+        ]
+        if blog.supports(.stories) {
+            actions.insert(StoryAction(handler: { [weak self] in
+                guard let self = self else {
+                    return
+                }
+                let presenter = RootViewCoordinator.sharedPresenter
+                presenter.showStoryEditor(blog: self.blog, title: nil, content: nil)
+            }, source: Constants.source), at: 0)
+        }
+        return CreateButtonCoordinator(self, actions: actions, source: Constants.source, blog: blog)
+    }()
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+
+        if traitCollection.horizontalSizeClass == .compact {
+            createButtonCoordinator.showCreateButton(for: blog)
+        }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+
+        configureCompactOrDefault()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        toggleCreateButton()
+    }
+
+    /// Shows/hides the create button based on the trait collection horizontal size class
+    @objc
+    private func toggleCreateButton() {
+        if traitCollection.horizontalSizeClass == .compact {
+            createButtonCoordinator.showCreateButton(for: blog)
+        } else {
+            createButtonCoordinator.hideCreateButton()
+        }
     }
 
     func configureNavigationButtons() {
-        navigationItem.rightBarButtonItems = [addButton, postsViewButtonItem]
+        navigationItem.rightBarButtonItems = [postsViewButtonItem]
     }
 
     @objc func togglePostsView() {
@@ -210,10 +275,14 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
         super.selectedFilterDidChange(filterBar)
     }
 
+    override func refresh(_ sender: AnyObject) {
+        updateGhostableTableViewOptions()
+        super.refresh(sender)
+    }
 
     /// Update the `GhostOptions` to correctly show compact or default cells
     private func updateGhostableTableViewOptions() {
-        let ghostOptions = GhostOptions(displaysSectionHeader: false, reuseIdentifier: postCellIdentifier, rowsPerSection: [10])
+        let ghostOptions = GhostOptions(displaysSectionHeader: false, reuseIdentifier: postCellIdentifier, rowsPerSection: [50])
         let style = GhostStyle(beatDuration: GhostStyle.Defaults.beatDuration,
                                beatStartColor: .placeholderElement,
                                beatEndColor: .placeholderElementFaded)
@@ -280,7 +349,7 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
 
         searchWrapperView.addSubview(searchController.searchBar)
 
-        tableView.scrollIndicatorInsets.top = searchController.searchBar.bounds.height
+        tableView.verticalScrollIndicatorInsets.top = searchController.searchBar.bounds.height
 
         updateTableHeaderSize()
     }
@@ -298,16 +367,33 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
     }
 
     func showCompactOrDefault() {
-        tableView.reloadSections([0], with: .automatic)
-
         updateGhostableTableViewOptions()
-        ghostableTableView.reloadSections([0], with: .automatic)
 
         postsViewButtonItem.accessibilityLabel = NSLocalizedString("List style", comment: "The accessibility label for the list style button in the Post List.")
         postsViewButtonItem.accessibilityValue = isCompact ? NSLocalizedString("Compact", comment: "Accessibility indication that the current Post List style is currently Compact.") : NSLocalizedString("Expanded", comment: "Accessibility indication that the current Post List style is currently Expanded.")
         postsViewButtonItem.image = postViewIcon
+
+        if isViewOnScreen() {
+            tableView.reloadSections([0], with: .automatic)
+            ghostableTableView.reloadSections([0], with: .automatic)
+        }
     }
 
+    private func configureInitialFilterIfNeeded() {
+        guard let initialFilterWithPostStatus = initialFilterWithPostStatus else {
+            return
+        }
+
+        filterSettings.setFilterWithPostStatus(initialFilterWithPostStatus)
+    }
+
+    /// Listens for the app coming to foreground in order to properly set the create button
+    private func listenForAppComingToForeground() {
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(toggleCreateButton),
+                                               name: UIApplication.willEnterForegroundNotification,
+                                               object: nil)
+    }
     // Mark - Layout Methods
 
     override func willTransition(to newCollection: UITraitCollection, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -474,7 +560,7 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
         }
 
         interactivePostView.setInteractionDelegate(self)
-        interactivePostView.setActionSheetDelegate?(self)
+        interactivePostView.setActionSheetDelegate(self)
 
         configurablePostView.configure(with: post)
 
@@ -499,7 +585,7 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
             return
         }
 
-        cell.isAuthorHidden = showingJustMyPosts
+        cell.shouldHideAuthor = showingJustMyPosts
     }
 
     private func configureRestoreCell(_ cell: UITableViewCell) {
@@ -515,8 +601,9 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
     override func createPost() {
         let editor = EditPostViewController(blog: blog)
         editor.modalPresentationStyle = .fullScreen
+        editor.entryPoint = .postsList
         present(editor, animated: false, completion: nil)
-        WPAppAnalytics.track(.editorCreatedPost, withProperties: ["tap_source": "posts_view"], with: blog)
+        WPAppAnalytics.track(.editorCreatedPost, withProperties: [WPAppAnalyticsKeyTapSource: "posts_view", WPAppAnalyticsKeyPostType: "post"], with: blog)
     }
 
     private func editPost(apost: AbstractPost) {
@@ -528,7 +615,16 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
             return
         }
 
-        PostListEditorPresenter.handle(post: post, in: self)
+        WPAppAnalytics.track(.postListEditAction, withProperties: propertiesForAnalytics(), with: post)
+        PostListEditorPresenter.handle(post: post, in: self, entryPoint: .postsList)
+    }
+
+    private func editDuplicatePost(apost: AbstractPost) {
+        guard let post = apost as? Post else {
+            return
+        }
+
+        PostListEditorPresenter.handleCopy(post: post, in: self)
     }
 
     func presentAlertForPostBeingUploaded() {
@@ -578,14 +674,14 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
             return
         }
 
-        let service = BlogService(managedObjectContext: ContextManager.sharedInstance().mainContext)
-        SiteStatsInformation.sharedInstance.siteTimeZone = service.timeZone(for: blog)
+        SiteStatsInformation.sharedInstance.siteTimeZone = blog.timeZone
         SiteStatsInformation.sharedInstance.oauth2Token = blog.authToken
         SiteStatsInformation.sharedInstance.siteID = blog.dotComID
 
         let postURL = URL(string: apost.permaLink! as String)
-        let postStatsTableViewController = PostStatsTableViewController.loadFromStoryboard()
-        postStatsTableViewController.configure(postID: postID, postTitle: apost.titleForDisplay(), postURL: postURL)
+        let postStatsTableViewController = PostStatsTableViewController.withJPBannerForBlog(postID: postID,
+                                                                                            postTitle: apost.titleForDisplay(),
+                                                                                            postURL: postURL)
         navigationController?.pushViewController(postStatsTableViewController, animated: true)
     }
 
@@ -605,8 +701,22 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
         }
     }
 
+    func duplicate(_ post: AbstractPost) {
+        editDuplicatePost(apost: post)
+    }
+
     func publish(_ post: AbstractPost) {
-        publishPost(post)
+        publishPost(post) {
+
+            BloggingRemindersFlow.present(from: self,
+                                          for: post.blog,
+                                          source: .publishFlow,
+                                          alwaysShow: false)
+        }
+    }
+
+    func copyLink(_ post: AbstractPost) {
+        copyPostLink(post)
     }
 
     func trash(_ post: AbstractPost) {
@@ -662,6 +772,22 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
         PostCoordinator.shared.cancelAutoUploadOf(post)
     }
 
+    func share(_ apost: AbstractPost, fromView view: UIView) {
+        guard let post = apost as? Post else {
+            return
+        }
+
+        WPAnalytics.track(.postListShareAction, properties: propertiesForAnalytics())
+
+        let shareController = PostSharingController()
+        shareController.sharePost(post, fromView: view, inViewController: self)
+    }
+
+    func blaze(_ post: AbstractPost) {
+        BlazeEventsTracker.trackEntryPointTapped(for: .postsList)
+        BlazeFlowCoordinator.presentBlaze(in: self, source: .postsList, blog: blog, post: post)
+    }
+
     // MARK: - Searching
 
     override func updateForLocalPostsMatchingSearchText() {
@@ -684,7 +810,7 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
         updateTableHeaderSize()
         _tableViewHandler.isSearching = true
 
-        tableView.scrollIndicatorInsets.top = searchWrapperView.bounds.height
+        tableView.verticalScrollIndicatorInsets.top = searchWrapperView.bounds.height
         tableView.contentInset.top = 0
     }
 
@@ -727,6 +853,7 @@ class PostListViewController: AbstractPostListViewController, UIViewControllerRe
         static let searchHeaderHeight: CGFloat = 40
         static let card = "card"
         static let compact = "compact"
+        static let source = "post_list"
     }
 }
 
@@ -793,6 +920,8 @@ private extension PostListViewController {
             return NoResultsText.noTrashedTitle
         case .published:
             return NoResultsText.noPublishedTitle
+        case .allNonTrashed:
+            return ""
         }
     }
 

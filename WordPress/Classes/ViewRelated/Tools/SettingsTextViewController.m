@@ -19,7 +19,7 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
 #pragma mark - Private Properties
 
 @interface SettingsTextViewController() <UITextFieldDelegate>
-@property (nonatomic, strong) NoticeAnimator    *noticeAnimator;
+@property (nonatomic, strong) MessageAnimator    *messageAnimator;
 @property (nonatomic, strong) WPTableViewCell   *textFieldCell;
 @property (nonatomic, strong) WPTableViewCell   *actionCell;
 @property (nonatomic, strong) UITextField       *textField;
@@ -47,7 +47,7 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
 
 - (instancetype)initWithText:(NSString *)text placeholder:(NSString *)placeholder hint:(NSString *)hint
 {
-    self = [super initWithStyle:UITableViewStyleGrouped];
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
         [self commonInitWithPlaceholder:placeholder hint:hint];
 
@@ -60,7 +60,7 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
 
 - (instancetype)initWithAttributedText:(NSAttributedString *)text defaultAttributes:(NSDictionary<NSAttributedStringKey, id> *)defaultAttributes placeholder:(NSString *)placeholder hint:(NSString *)hint
 {
-    self = [super initWithStyle:UITableViewStyleGrouped];
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
         [self commonInitWithPlaceholder:placeholder hint:hint];
         
@@ -116,7 +116,7 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    [self setupNoticeAnimatorIfNeeded];
+    [self setupMessageAnimatorIfNeeded];
 }
 
 - (void)viewDidAppear:(BOOL)animated
@@ -138,11 +138,22 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
-    [self.noticeAnimator layout];
+    [self.messageAnimator layout];
 }
 
 
 #pragma mark - NavigationItem Buttons
+
+- (void)setDisplaysNavigationButtons:(BOOL)displaysNavigationButtons
+{
+    if (displaysNavigationButtons) {
+        self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancel)];
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(confirm)];
+    } else {
+        self.navigationItem.leftBarButtonItem = nil;
+        self.navigationItem.rightBarButtonItem = nil;
+    }
+}
 
 - (void)cancel
 {
@@ -155,14 +166,14 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
     [self dismissViewController];
 }
 
-- (void)setupNoticeAnimatorIfNeeded
+- (void)setupMessageAnimatorIfNeeded
 {
     if (self.notice == nil) {
         return;
     }
     
-    self.noticeAnimator = [[NoticeAnimator alloc] initWithTarget:self.view];
-    [self.noticeAnimator animateMessage:self.notice];
+    self.messageAnimator = [[MessageAnimator alloc] initWithTarget:self.view];
+    [self.messageAnimator animateMessage:self.notice];
 }
 
 
@@ -180,12 +191,13 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
 - (BOOL)textPassesValidation
 {
     BOOL isEmail = (self.mode == SettingsTextModesEmail);
-    return (self.validatesInput == false || isEmail == false || (isEmail && self.textField.text.isValidEmail));
+    return ([self.textField hasText] && (self.validatesInput == false || isEmail == false || (isEmail && self.textField.text.isValidEmail)));
 }
 
 - (void)validateTextInput:(id)sender
 {
     self.doneButtonEnabled = [self textPassesValidation];
+    [self setEnabledStateForCell:_actionCell value:self.doneButtonEnabled];
 }
 
 
@@ -229,7 +241,8 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
     _actionCell.textLabel.textAlignment = NSTextAlignmentCenter;
     
     [WPStyleGuide configureTableViewActionCell:_actionCell];
-    
+    [self setEnabledStateForCell:_actionCell value:self.doneButtonEnabled];
+
     return _actionCell;
 }
 
@@ -331,7 +344,7 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
 - (void)dismissViewController
 {
     if (self.isModal) {
-        [self dismissViewControllerAnimated:YES completion:nil];
+        [self dismissViewControllerAnimated:YES completion:self.onDismiss];
     } else {
         [self.navigationController popViewControllerAnimated:YES];
     }
@@ -362,11 +375,9 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
         requiresSecureTextEntry = YES;
     } else if (newMode == SettingsTextModesNewPassword) {
         requiresSecureTextEntry = YES;
-        if (@available(iOS 12.0, *)) {
-            NSString *passwordDescriptor = @"required: lower; required: upper; required: digit; required: [&)*]]; minlength: 6; maxlength: 24;";
-            self.textField.passwordRules = [UITextInputPasswordRules passwordRulesWithDescriptor:passwordDescriptor];
-            self.textField.textContentType = UITextContentTypeNewPassword;
-        }
+        NSString *passwordDescriptor = @"required: lower; required: upper; required: digit; required: [&)*]]; minlength: 6; maxlength: 24;";
+        self.textField.passwordRules = [UITextInputPasswordRules passwordRulesWithDescriptor:passwordDescriptor];
+        self.textField.textContentType = UITextContentTypeNewPassword;
     } else if (newMode == SettingsTextModesEmail) {
         keyboardType = UIKeyboardTypeEmailAddress;
         autocapitalizationType = UITextAutocapitalizationTypeNone;
@@ -384,6 +395,14 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
     self.textField.autocorrectionType = autocorrectionType;
 }
 
+- (void)setEnabledStateForCell:(UITableViewCell *)ActionCell value:(BOOL)value
+{
+    if (value) {
+        [_actionCell enable];
+    } else {
+        [_actionCell disable];
+    }
+}
 
 #pragma mark - UITextFieldDelegate Methods
 

@@ -1,4 +1,5 @@
 import Foundation
+import AutomatticTracks
 import Sentry
 
 private struct ErrorWithCaller {
@@ -21,6 +22,10 @@ startup time. This will block the thread. Do not use unless you're sure.
         errors.append(ErrorWithCaller(error: error, caller: "\(function) (\(filename):\(line))"))
     }
 
+    func add(error: Error, file: String = #file, function: String = #function, line: UInt = #line) {
+        add(error: error as NSError, file: file, function: function, line: line)
+    }
+
     @objc(addError:file:function:line:)
     func _objc_add(error: NSError, file: UnsafePointer<CChar>, function: UnsafePointer<CChar>, line: UInt) {
         add(error: error, file: String(cString: file), function: String(cString: function), line: line)
@@ -28,15 +33,7 @@ startup time. This will block the thread. Do not use unless you're sure.
 
     // Send the event and block the thread until it was actually sent
     @objc func send(title: String) {
-        guard !WPAppAnalytics.userHasOptedOut(),
-            let client = try? Client(dsn: ApiCredentials.sentryDSN()) else {
-            return
-        }
-        let semaphore = DispatchSemaphore(value: 0)
-        let event = Event(level: .debug)
-        event.message = title
-
-        event.extra = errors.enumerated().reduce(into: [String: Any](), { (result, arg1) in
+        let userInfo = errors.enumerated().reduce(into: [String: Any](), { (result, arg1) in
             let (index, errorWithCaller) = arg1
             let error = errorWithCaller.error
             result["Error \(index + 1)"] = [
@@ -45,13 +42,15 @@ startup time. This will block the thread. Do not use unless you're sure.
                 "Code": error.code,
                 "Description": error.localizedDescription,
                 "User Info": error.userInfo.description
-            ]
+            ] as [String: Any]
         })
 
-        client.send(event: event, completion: { _ in
-            semaphore.signal()
-        })
-
-        semaphore.wait()
+        let error = NSError(domain: title, code: -1, userInfo: [NSLocalizedDescriptionKey: title])
+        do {
+            try WordPressAppDelegate.crashLogging?.logErrorAndWait(error, userInfo: userInfo, level: SentryLevel.fatal)
+        } catch let err {
+            DDLogError("⛔️ Unable to send startup error message to Sentry:")
+            DDLogError(err.localizedDescription)
+        }
     }
 }

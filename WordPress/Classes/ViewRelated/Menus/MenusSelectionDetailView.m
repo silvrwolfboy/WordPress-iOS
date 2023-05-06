@@ -42,6 +42,7 @@
     [self setupSubtTitleLabel];
     [self setupTitleLabel];
     [self setupAccessoryView];
+    [self prepareForVoiceOver];
 
     self.backgroundColor = [UIColor clearColor];
 
@@ -109,7 +110,7 @@
 {
     UIImageView *accessoryView = [[UIImageView alloc] init];
     accessoryView.contentMode = UIViewContentModeScaleAspectFit;
-    accessoryView.image = [Gridicon iconOfType:GridiconTypeChevronDown];
+    accessoryView.image = [UIImage gridiconOfType:GridiconTypeChevronDown];
     accessoryView.tintColor = [UIColor murielTextTertiary];
     [accessoryView.widthAnchor constraintEqualToConstant:24].active = YES;
     [accessoryView.heightAnchor constraintEqualToConstant:24].active = YES;
@@ -141,7 +142,7 @@
         } else  {
             localizedFormat = NSLocalizedString(@"%i menu area in this theme", @"One menu area available in the theme");
         }
-        self.iconView.image = [Gridicon iconOfType:GridiconTypeLayout];
+        self.iconView.image = [UIImage gridiconOfType:GridiconTypeLayout];
 
     } else  if ([selectedItem isMenu]) {
 
@@ -150,7 +151,7 @@
         } else  {
             localizedFormat = NSLocalizedString(@"%i menu available", @"One menu is available in the site and area");
         }
-        self.iconView.image = [Gridicon iconOfType:GridiconTypeMenus];
+        self.iconView.image = [UIImage gridiconOfType:GridiconTypeMenus];
     }
 
     [self setTitleText:selectedItem.displayName subTitleText:[NSString stringWithFormat:localizedFormat, numItemsAvailable]];
@@ -196,6 +197,14 @@
     if ([self.delegate respondsToSelector:@selector(selectionDetailView:touchesHighlightedStateChanged:)]) {
         [self.delegate selectionDetailView:self touchesHighlightedStateChanged:highlighted];
     }
+}
+
+#pragma mark - Accessibility
+
+- (void)prepareForVoiceOver
+{
+    self.isAccessibilityElement = YES;
+    self.accessibilityTraits = UIAccessibilityTraitButton;
 }
 
 @end

@@ -19,13 +19,13 @@ class ShareNoticeNavigationCoordinator {
 
         let editor = EditPostViewController.init(post: post)
         editor.modalPresentationStyle = .fullScreen
-        WPTabBarController.sharedInstance().present(editor, animated: false)
+        RootViewCoordinator.sharedPresenter.rootViewController.present(editor, animated: false)
     }
 
     static func navigateToPostList(with userInfo: NSDictionary) {
         fetchPost(from: userInfo, onSuccess: { post in
             if let post = post {
-                WPTabBarController.sharedInstance().switchTabToPostsList(for: post)
+                RootViewCoordinator.sharedPresenter.showPosts(for: post.blog)
             }
         }, onFailure: {
             DDLogError("Could not fetch post from share notification.")
@@ -35,7 +35,7 @@ class ShareNoticeNavigationCoordinator {
     static func navigateToBlogDetails(with userInfo: NSDictionary) {
         fetchBlog(from: userInfo, onSuccess: { blog in
             if let blog = blog {
-                WPTabBarController.sharedInstance().switchMySitesTabToBlogDetails(for: blog)
+                RootViewCoordinator.sharedPresenter.showBlogDetails(for: blog)
             }
         }, onFailure: {
             DDLogError("Could not fetch blog from share notification.")
@@ -46,14 +46,13 @@ class ShareNoticeNavigationCoordinator {
                                   onSuccess: @escaping (_ post: Post?) -> Void,
                                   onFailure: @escaping () -> Void) {
         let context = ContextManager.sharedInstance().mainContext
-        let blogService = BlogService(managedObjectContext: context)
         let postService = PostService(managedObjectContext: context)
 
         guard let postIDString = userInfo[ShareNoticeUserInfoKey.postID] as? String,
             let postID = NumberFormatter().number(from: postIDString),
             let siteIDString = userInfo[ShareNoticeUserInfoKey.blogID] as? String,
             let siteID = NumberFormatter().number(from: siteIDString),
-            let blog = blogService.blog(byBlogId: siteID) else {
+            let blog = Blog.lookup(withID: siteID, in: context) else {
                 onFailure()
                 return
         }
@@ -78,9 +77,7 @@ class ShareNoticeNavigationCoordinator {
                 return
         }
 
-        let context = ContextManager.sharedInstance().mainContext
-        let blogService = BlogService(managedObjectContext: context)
-        let blog = blogService.blog(byBlogId: siteID)
-        onSuccess(blog)
+        let context = ContextManager.shared.mainContext
+        onSuccess(Blog.lookup(withID: siteID, in: context))
     }
 }

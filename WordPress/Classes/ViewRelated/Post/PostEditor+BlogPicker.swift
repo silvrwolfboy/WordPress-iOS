@@ -1,6 +1,6 @@
 import UIKit
 
-extension PostEditor where Self: UIViewController {
+extension PostEditor {
 
     func blogPickerWasPressed() {
         assert(isSingleSiteMode == false)
@@ -21,6 +21,7 @@ extension PostEditor where Self: UIViewController {
         // Setup Handlers
         let successHandler: BlogSelectorSuccessHandler = { selectedObjectID in
             self.dismiss(animated: true)
+            WPAnalytics.track(.editorPostSiteChanged)
 
             guard let blog = self.mainContext.object(with: selectedObjectID) as? Blog else {
                 return
@@ -68,8 +69,7 @@ extension PostEditor where Self: UIViewController {
     // TODO: Rip this and put it into PostService, as well
     func recreatePostRevision(in blog: Blog) {
         let shouldCreatePage = post is Page
-        let postService = PostService(managedObjectContext: mainContext)
-        let newPost = shouldCreatePage ? postService.createDraftPage(for: blog) : postService.createDraftPost(for: blog)
+        let newPost = shouldCreatePage ? blog.createDraftPage() : blog.createDraftPost()
         // if it's a reblog, use the existing content and don't strip the image
         newPost.content = postIsReblogged ? post.content : contentByStrippingMediaAttachments()
         newPost.postTitle = post.postTitle

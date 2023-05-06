@@ -1,7 +1,7 @@
 #import "WPAuthTokenIssueSolver.h"
 #import "AccountService.h"
 #import "BlogService.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "WPAccount.h"
 #import "WordPress-Swift.h"
 
@@ -22,8 +22,7 @@
                 // alert instead of itself.
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [self showCancelReAuthenticationAlertAndOnOK:^{
-                        NSManagedObjectContext *mainContext = [[ContextManager sharedInstance] mainContext];
-                        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:mainContext];
+                        AccountService *accountService = [[AccountService alloc] initWithCoreDataStack:[ContextManager sharedInstance]];
 
                         [accountService removeDefaultWordPressComAccount];
                         onComplete();
@@ -34,7 +33,7 @@
             }
         }];
 
-        [UIApplication sharedApplication].keyWindow.rootViewController = controller;
+        [UIApplication sharedApplication].mainWindow.rootViewController = controller;
 
         [self showExplanationAlertForReAuthenticationDueToMissingAuthToken];
         isFixingAuthTokenIssue = YES;
@@ -48,20 +47,6 @@
 #pragma mark - Misc
 
 /**
- *  @brief      Call this method to know if there are hosted blogs.
- *
- *  @returns    YES if there are hosted blogs, NO otherwise.
- */
-- (BOOL)noSelfHostedBlogs
-{
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-
-    NSInteger blogCount = [blogService blogCountSelfHosted];
-    return blogCount == 0;
-}
-
-/**
  *  @brief      Call this method to know if the local installation of WPiOS has the authToken issue
  *              this class was designed to solve.
  *
@@ -70,8 +55,7 @@
 - (BOOL)hasAuthTokenIssues
 {
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-    WPAccount *account = [accountService defaultWordPressComAccount];
+    WPAccount *account = [WPAccount lookupDefaultWordPressComAccountInContext:context];
 
     BOOL hasAuthTokenIssues = account && ![account authToken];
 
@@ -104,16 +88,16 @@
 
     UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:cancelButtonTitle
                                                            style:UIAlertActionStyleCancel
-                                                         handler:^(UIAlertAction *action){}];
+                                                         handler:^(UIAlertAction *__unused action){}];
 
     UIAlertAction *deleteAction = [UIAlertAction actionWithTitle:deleteButtonTitle
                                                            style:UIAlertActionStyleDestructive
-                                                         handler:^(UIAlertAction *action){
+                                                         handler:^(UIAlertAction *__unused action){
                                                              okBlock();
                                                          }];
     [alertController addAction:cancelAction];
     [alertController addAction:deleteAction];
-    [[[UIApplication sharedApplication] keyWindow].rootViewController presentViewController:alertController
+    [[[UIApplication sharedApplication] mainWindow].rootViewController presentViewController:alertController
                                                                                    animated:YES
                                                                                  completion:nil];
 }
@@ -140,7 +124,7 @@
 
     UIAlertAction *okAction = [UIAlertAction actionWithTitle:okButtonTitle
                                                        style:UIAlertActionStyleDefault
-                                                     handler:^(UIAlertAction *action){}];
+                                                     handler:^(UIAlertAction *__unused action){}];
     [alertController addAction:okAction];
     alertController.modalPresentationStyle = UIModalPresentationPopover;
 

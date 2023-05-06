@@ -4,7 +4,7 @@ class NoticeView: UIView {
     internal let contentStackView = UIStackView()
 
     internal let backgroundContainerView = UIView()
-    internal let backgroundView = UIVisualEffectView(effect: UIBlurEffect(style: .extraLight))
+    internal let backgroundView = UIVisualEffectView(effect: Constants.visualEffect)
     internal let actionBackgroundView = UIView()
     private let shadowLayer = CAShapeLayer()
     private let shadowMaskLayer = CAShapeLayer()
@@ -16,6 +16,10 @@ class NoticeView: UIView {
 
     private let actionButton = UIButton(type: .system)
     private let cancelButton = UIButton(type: .system)
+
+    private lazy var nextArrowImageView: UIImageView = {
+        configureNextArrow()
+    }()
 
     internal let notice: Notice
     internal var dualButtonsStackView: UIStackView?
@@ -34,16 +38,29 @@ class NoticeView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    internal func configureGestureRecognizer() {
+        switch notice.style.dismissGesture {
+        case .tap:
+            let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(cancelButtonTapped))
+            addGestureRecognizer(tapRecognizer)
+        case .none:
+            ()
+        }
+    }
+
     /// configure the NoticeView for display
     internal func configure() {
         configureBackgroundViews()
         configureShadow()
         configureContentStackView()
+        configureGestureRecognizer()
         configureLabels()
         configureForNotice()
 
         if notice.actionTitle != nil && notice.cancelTitle != nil {
             configureDualButtons()
+        } else if notice.actionTitle != nil && notice.style.showNextArrow {
+            configureActionButtonWithArrow()
         } else if notice.actionTitle != nil {
             configureActionButton()
         }
@@ -77,6 +94,11 @@ class NoticeView: UIView {
         backgroundContainerView.layer.masksToBounds = true
     }
 
+    func configureArrow() {
+        let arrowView = addArrow(color: notice.style.backgroundColor, size: Metrics.arrowSize)
+        arrowView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: Metrics.arrowPosition).isActive = true
+    }
+
     internal func configureShadow() {
         shadowLayer.shadowPath = UIBezierPath(roundedRect: layer.bounds, cornerRadius: Metrics.cornerRadius).cgPath
         shadowLayer.shadowColor = Appearance.shadowColor.cgColor
@@ -98,7 +120,7 @@ class NoticeView: UIView {
         // Construct a mask path with the notice's roundrect cut out of a larger padding rect.
         // This, combined with the `kCAFillRuleEvenOdd` gives us an inverted mask, so
         // the shadow only appears _outside_ of the notice roundrect, and doesn't appear underneath
-        // and obscure the blur visual effect view. 
+        // and obscure the blur visual effect view.
         let maskPath = CGMutablePath()
         let leftInset = notice.style.layoutMargins.left * 2
         let topInset = notice.style.layoutMargins.top * 2
@@ -168,7 +190,7 @@ class NoticeView: UIView {
         actionBackgroundView.pinSubviewToAllEdgeMargins(actionButton)
 
         actionButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        actionButton.setTitleColor(.primary(.shade40), for: .normal)
+        actionButton.setTitleColor(.invertedLink, for: .normal)
         actionButton.addTarget(self, action: #selector(actionButtonTapped), for: .touchUpInside)
         actionButton.setContentCompressionResistancePriority(.required, for: .horizontal)
     }
@@ -223,7 +245,7 @@ class NoticeView: UIView {
         cancelBackgroundView.addTrailingBorder()
 
         actionButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        actionButton.setTitleColor(.white, for: .normal)
+        actionButton.setTitleColor(notice.style.titleColor, for: .normal)
         actionButton.on(.touchUpInside) { [weak self] _ in
             self?.actionButtonTapped()
         }
@@ -235,6 +257,60 @@ class NoticeView: UIView {
             self?.cancelButtonTapped()
         }
         cancelButton.setContentCompressionResistancePriority(.required, for: .vertical)
+    }
+
+    private func configureActionButtonWithArrow() {
+        guard let actionTitle = notice.actionTitle,
+              notice.style.showNextArrow else {
+                  actionBackgroundView.isHidden = true
+                  return
+              }
+
+        contentStackView.addArrangedSubview(actionBackgroundView)
+        actionBackgroundView.translatesAutoresizingMaskIntoConstraints = false
+        actionBackgroundView.layoutMargins = notice.style.layoutMargins
+        actionBackgroundView.backgroundColor = notice.style.backgroundColor
+
+        NSLayoutConstraint.activate([
+            actionBackgroundView.topAnchor.constraint(equalTo: backgroundView.contentView.topAnchor),
+            actionBackgroundView.bottomAnchor.constraint(equalTo: backgroundView.contentView.bottomAnchor)
+        ])
+
+        actionButton.setTitle(actionTitle, for: .normal)
+        actionButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        actionButton.setTitleColor(.invertedLink, for: .normal)
+        actionButton.addTarget(self, action: #selector(actionButtonTapped), for: .touchUpInside)
+
+        actionBackgroundView.addSubviews([actionButton, nextArrowImageView])
+
+        actionButton.translatesAutoresizingMaskIntoConstraints = false
+        nextArrowImageView.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            actionButton.centerYAnchor.constraint(equalTo: actionBackgroundView.centerYAnchor),
+            actionButton.leadingAnchor.constraint(greaterThanOrEqualTo: actionBackgroundView.leadingAnchor)
+        ])
+
+        NSLayoutConstraint.activate([
+            nextArrowImageView.centerYAnchor.constraint(equalTo: actionButton.centerYAnchor),
+            nextArrowImageView.leadingAnchor.constraint(equalTo: actionButton.trailingAnchor, constant: 5),
+            nextArrowImageView.trailingAnchor.constraint(equalTo: actionBackgroundView.trailingAnchor, constant: -16)
+        ])
+    }
+
+    private func configureNextArrow() -> UIImageView {
+        guard let image = UIImage(named: "disclosure-chevron")?.withTintColor(.invertedLink).imageFlippedForRightToLeftLayoutDirection() else {
+            return UIImageView()
+        }
+
+        let arrowImageView = UIImageView(image: image)
+        arrowImageView.backgroundColor = notice.style.backgroundColor
+
+        NSLayoutConstraint.activate([
+            arrowImageView.heightAnchor.constraint(greaterThanOrEqualToConstant: 13.0)
+        ])
+
+        return arrowImageView
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -293,7 +369,7 @@ class NoticeView: UIView {
         dismissHandler?()
     }
 
-    private func cancelButtonTapped() {
+    @objc private func cancelButtonTapped() {
         notice.actionHandler?(false)
         dismissHandler?()
     }
@@ -302,9 +378,11 @@ class NoticeView: UIView {
         static let cornerRadius: CGFloat = 4.0
         static let dualLayoutMargins = UIEdgeInsets(top: 6.0, left: 6.0, bottom: 6.0, right: 6.0)
         static let labelLineSpacing: CGFloat = 3.0
+        static let arrowSize = CGSize(width: 20, height: 10)
+        static let arrowPosition: CGFloat = -24 /// Arrow is positioned along the right hand side by default.
     }
 
-    private enum Appearance {
+    fileprivate enum Appearance {
         static let shadowColor: UIColor = .black
         static let shadowOpacity: Float = 0.25
         static let shadowRadius: CGFloat = 2.0
@@ -338,7 +416,7 @@ fileprivate extension UIView {
 
     func makeBorderView() -> UIView {
         let borderView = UIView()
-        borderView.backgroundColor = Constants.borderColor
+        borderView.backgroundColor = .invertedSeparator
         borderView.translatesAutoresizingMaskIntoConstraints = false
         self.addSubview(borderView)
 
@@ -346,7 +424,72 @@ fileprivate extension UIView {
     }
 
     struct Constants {
-        static let borderColor = UIColor.white.withAlphaComponent(0.25)
+        static let visualEffect = UIBlurEffect(style: .extraLight)
+    }
+}
+
+// MARK: - Arrow
+
+fileprivate extension UIView {
+
+    func addArrow(color: UIColor, size: CGSize) -> UIView {
+        let arrowView = makeArrowView(color: color)
+
+        NSLayoutConstraint.activate([
+            arrowView.heightAnchor.constraint(equalToConstant: size.height),
+            arrowView.widthAnchor.constraint(equalToConstant: size.width),
+            arrowView.topAnchor.constraint(equalTo: bottomAnchor)
+        ])
+
+        return arrowView
+    }
+
+    func makeArrowView(color: UIColor) -> UIView {
+        let arrowView = ArrowView()
+        arrowView.backgroundColor = color
+        arrowView.translatesAutoresizingMaskIntoConstraints = false
+
+        let visualEffectView = ArrowEffectView(effect: Constants.visualEffect)
+        visualEffectView.backgroundColor = .clear
+        visualEffectView.translatesAutoresizingMaskIntoConstraints = false
+        visualEffectView.contentView.addSubview(arrowView)
+        visualEffectView.pinSubviewToAllEdges(arrowView)
+
+        addSubview(visualEffectView)
+        return visualEffectView
+    }
+}
+
+/// A Downward pointing triangle shaped view
+private class ArrowView: UIView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        let trianglePath = UIBezierPath()
+        trianglePath.move(to: .zero)
+        trianglePath.addLine(to: CGPoint(x: bounds.size.width / 2, y: bounds.size.height))
+        trianglePath.addLine(to: CGPoint(x: bounds.size.width, y: 0))
+        trianglePath.close()
+
+        let shapeLayer = CAShapeLayer()
+        shapeLayer.path = trianglePath.cgPath
+        layer.mask = shapeLayer
+    }
+}
+
+private class ArrowEffectView: UIVisualEffectView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        let trianglePath = UIBezierPath()
+        trianglePath.move(to: .zero)
+        trianglePath.addLine(to: CGPoint(x: bounds.size.width / 2, y: bounds.size.height))
+        trianglePath.addLine(to: CGPoint(x: bounds.size.width, y: 0))
+        trianglePath.close()
+
+        let shapeLayer = CAShapeLayer()
+        shapeLayer.path = trianglePath.cgPath
+        layer.mask = shapeLayer
     }
 }
 

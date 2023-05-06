@@ -1,7 +1,71 @@
 import Foundation
 import WordPressFlux
 
-extension PostEditor where Self: UIViewController {
+protocol PublishingEditor where Self: UIViewController {
+    //TODO: Add publishing things
+    var post: AbstractPost { get set }
+
+    var isUploadingMedia: Bool { get }
+
+    /// Post editor state context
+    var postEditorStateContext: PostEditorStateContext { get }
+
+    /// Editor Session information for analytics reporting
+    var editorSession: PostEditorAnalyticsSession { get set }
+
+    /// Verification prompt helper
+    var verificationPromptHelper: VerificationPromptHelper? { get }
+
+    /// Describes the editor type to be used in analytics reporting
+    var analyticsEditorSource: String { get }
+
+    /// Title of the post
+    var postTitle: String { get set }
+
+    var prepublishingSourceView: UIView? { get }
+
+    var alertBarButtonItem: UIBarButtonItem? { get }
+
+    /// Closure to be executed when the editor gets closed.
+    var onClose: ((_ changesSaved: Bool, _ shouldShowPostPost: Bool) -> Void)? { get set }
+
+    /// Return the current html in the editor
+    func getHTML() -> String
+
+    /// Cancels all ongoing uploads
+    func cancelUploadOfAllMedia(for post: AbstractPost)
+
+    /// When the Prepublishing sheet or Prepublishing alert is dismissed, this is called.
+    func publishingDismissed()
+
+    func removeFailedMedia()
+
+    /// Returns the word counts of the content in the editor.
+    var wordCount: UInt { get }
+
+    /// Debouncer used to save the post locally with a delay
+    var debouncer: Debouncer { get }
+
+    var prepublishingIdentifiers: [PrepublishingIdentifier] { get }
+
+    func emitPostSaveEvent()
+}
+
+var postPublishedReceipt: Receipt?
+
+extension PublishingEditor {
+
+    func publishingDismissed() {
+        // Default implementation is empty, can be optionally implemented by other classes.
+    }
+
+    func emitPostSaveEvent() {
+        // Default implementation is empty, can be optionally implemented by other classes.
+    }
+
+    func removeFailedMedia() {
+        // TODO: we can only implement this when GB bridge allows removal of blocks
+    }
 
     // The debouncer will perform this callback every 500ms in order to save the post locally with a delay.
     var debouncerCallback: (() -> Void) {
@@ -27,6 +91,8 @@ extension PostEditor where Self: UIViewController {
             dismissWhenDone: action.dismissesEditor,
             analyticsStat: self.postEditorStateContext.publishActionAnalyticsStat)
     }
+
+
 
     func publishPost(
         action: PostEditorAction,
@@ -55,8 +121,6 @@ extension PostEditor where Self: UIViewController {
             return
         }
 
-        let isPage = post is Page
-
         let publishBlock = { [unowned self] in
             if action == .saveAsDraft {
                 self.post.status = .draft
@@ -78,10 +142,33 @@ extension PostEditor where Self: UIViewController {
                 self.post.status = .pending
             }
 
+            self.post.isFirstTimePublish = action == .publish || action == .publishNow
+
             self.post.shouldAttemptAutoUpload = true
 
+            emitPostSaveEvent()
+
             if let analyticsStat = analyticsStat {
-                self.trackPostSave(stat: analyticsStat)
+                if self is StoryEditor {
+                    postPublishedReceipt = ActionDispatcher.global.subscribe({ [self] action in
+                        if let noticeAction = action as? NoticeAction {
+                            switch noticeAction {
+                            case .post:
+                                self.trackPostSave(stat: analyticsStat)
+                            default:
+                                break
+                            }
+                            postPublishedReceipt = nil
+                        }
+                    })
+                } else {
+                    self.trackPostSave(stat: analyticsStat)
+                }
+            }
+
+            if self.post.isFirstTimePublish {
+                QuickStartTourGuide.shared.complete(tour: QuickStartPublishTour(),
+                                                    silentlyForBlog: self.post.blog)
             }
 
             if dismissWhenDone {
@@ -97,30 +184,28 @@ extension PostEditor where Self: UIViewController {
             }
         }
 
-        let promoBlock = { [unowned self] in
-            UserDefaults.standard.asyncPromoWasDisplayed = true
+        if action.isAsync,
+           let postStatus = self.post.original?.status ?? self.post.status,
+           ![.publish, .publishPrivate].contains(postStatus) {
+            WPAnalytics.track(.editorPostPublishTap)
 
-            let controller = FancyAlertViewController.makeAsyncPostingAlertController(action: action, isPage: isPage, onConfirm: publishBlock)
-            controller.modalPresentationStyle = .custom
-            controller.transitioningDelegate = self
-            self.present(controller, animated: true, completion: nil)
-        }
-
-
-        if action.isAsync &&
-            !UserDefaults.standard.asyncPromoWasDisplayed {
-            promoBlock()
-        } else if action.isAsync,
-            let postStatus = self.post.status,
-            ![.publish, .publishPrivate].contains(postStatus) {
             // Only display confirmation alert for unpublished posts
-            displayPublishConfirmationAlert(for: action, onPublish: publishBlock)
+            displayPublishConfirmationAlert(for: action, onPublish: publishBlock, onDismiss: { [weak self] in
+                self?.publishingDismissed()
+                WPAnalytics.track(.editorPostPublishDismissed)
+            })
         } else {
             publishBlock()
         }
     }
 
-    fileprivate func displayMediaIsUploadingAlert() {
+    func displayPostIsUploadingAlert() {
+        let alertController = UIAlertController(title: PostUploadingAlert.title, message: PostUploadingAlert.message, preferredStyle: .alert)
+        alertController.addDefaultActionWithTitle(PostUploadingAlert.acceptTitle)
+        present(alertController, animated: true, completion: nil)
+    }
+
+    func displayMediaIsUploadingAlert() {
         let alertController = UIAlertController(title: MediaUploadingAlert.title, message: MediaUploadingAlert.message, preferredStyle: .alert)
         alertController.addDefaultActionWithTitle(MediaUploadingAlert.acceptTitle)
         present(alertController, animated: true, completion: nil)
@@ -137,20 +222,65 @@ extension PostEditor where Self: UIViewController {
         present(alertController, animated: true, completion: nil)
     }
 
+    /// If the user is publishing a post, displays the Prepublishing Nudges
+    /// Otherwise, shows a confirmation Action Sheet.
+    ///
+    /// - Parameters:
+    ///     - action: Publishing action being performed
+    ///
+    fileprivate func displayPublishConfirmationAlert(for action: PostEditorAction, onPublish publishAction: @escaping () -> (), onDismiss dismissAction: @escaping () -> ()) {
+        if let post = post as? Post {
+            displayPrepublishingNudges(post: post, onPublish: publishAction, onDismiss: dismissAction)
+        } else {
+            displayPublishConfirmationAlertForPage(for: action, onPublish: publishAction, onDismiss: dismissAction)
+        }
+    }
+
+    /// Displays the Prepublishing Nudges Bottom Sheet
+    ///
+    /// - Parameters:
+    ///     - action: Publishing action being performed
+    ///
+    fileprivate func displayPrepublishingNudges(post: Post, onPublish publishAction: @escaping () -> (), onDismiss dismissAction: @escaping () -> ()) {
+        // End editing to avoid issues with accessibility
+        view.endEditing(true)
+
+        let prepublishing = PrepublishingViewController(post: post, identifiers: prepublishingIdentifiers) { [weak self] result in
+            switch result {
+            case .completed(let post):
+                self?.post = post
+                publishAction()
+            case .dismissed:
+                dismissAction()
+            }
+        }
+
+        let isTitleDisplayed = prepublishingIdentifiers.contains { $0 == .title }
+        let shouldDisplayPortrait = WPDeviceIdentification.isiPhone() && isTitleDisplayed
+        let prepublishingNavigationController = PrepublishingNavigationController(rootViewController: prepublishing, shouldDisplayPortrait: shouldDisplayPortrait)
+        let bottomSheet = BottomSheetViewController(childViewController: prepublishingNavigationController, customHeaderSpacing: 0)
+        if let sourceView = prepublishingSourceView {
+            bottomSheet.show(from: self, sourceView: sourceView)
+        } else {
+            bottomSheet.show(from: self.topmostPresentedViewController)
+        }
+    }
+
     /// Displays a publish confirmation alert with two options: "Keep Editing" and String for Action.
     ///
     /// - Parameters:
     ///     - action: Publishing action being performed
-    ///     - dismissWhenDone: if `true`, the VC will be dismissed if the user picks "Publish".
     ///
-    fileprivate func displayPublishConfirmationAlert(for action: PostEditorAction, onPublish publishAction: @escaping () -> ()) {
+    fileprivate func displayPublishConfirmationAlertForPage(for action: PostEditorAction, onPublish publishAction: @escaping () -> (), onDismiss dismissAction: @escaping () -> ()) {
         let title = action.publishingActionQuestionLabel
         let keepEditingTitle = NSLocalizedString("Keep Editing", comment: "Button shown when the author is asked for publishing confirmation.")
         let publishTitle = action.publishActionLabel
         let style: UIAlertController.Style = UIDevice.isPad() ? .alert : .actionSheet
         let alertController = UIAlertController(title: title, message: nil, preferredStyle: style)
 
-        alertController.addCancelActionWithTitle(keepEditingTitle)
+        alertController.addCancelActionWithTitle(keepEditingTitle) { _ in
+            dismissAction()
+        }
         alertController.addDefaultActionWithTitle(publishTitle) { _ in
             publishAction()
         }
@@ -158,23 +288,27 @@ extension PostEditor where Self: UIViewController {
     }
 
     private func trackPostSave(stat: WPAnalyticsStat) {
+        let postTypeValue = post is Page ? "page" : "post"
+
         guard stat != .editorSavedDraft && stat != .editorQuickSavedDraft else {
-            WPAppAnalytics.track(stat, withProperties: [WPAppAnalyticsKeyEditorSource: analyticsEditorSource], with: post.blog)
+            WPAppAnalytics.track(stat, withProperties: [WPAppAnalyticsKeyEditorSource: analyticsEditorSource, WPAppAnalyticsKeyPostType: postTypeValue], with: post.blog)
             return
         }
 
-        let originalWordCount = post.original?.content?.wordCount() ?? 0
-        let wordCount = post.content?.wordCount() ?? 0
+        let wordCount = self.wordCount
         var properties: [String: Any] = ["word_count": wordCount, WPAppAnalyticsKeyEditorSource: analyticsEditorSource]
-        if post.hasRemote() {
-            properties["word_diff_count"] = originalWordCount
-        }
+
+        properties[WPAppAnalyticsKeyPostType] = postTypeValue
 
         if stat == .editorPublishedPost {
             properties[WPAnalyticsStatEditorPublishedPostPropertyCategory] = post.hasCategories()
             properties[WPAnalyticsStatEditorPublishedPostPropertyPhoto] = post.hasPhoto()
             properties[WPAnalyticsStatEditorPublishedPostPropertyTag] = post.hasTags()
             properties[WPAnalyticsStatEditorPublishedPostPropertyVideo] = post.hasVideo()
+
+            if let post = post as? Post, let promptId = post.bloggingPromptID {
+                properties["prompt_id"] = promptId
+            }
         }
 
         WPAppAnalytics.track(stat, withProperties: properties, with: post)
@@ -191,13 +325,25 @@ extension PostEditor where Self: UIViewController {
         /// Otherwise, we'll show an Action Sheet with options.
         if post.shouldAttemptAutoUpload && post.canSave() {
             editorSession.end(outcome: .cancel)
-            dismissOrPopView(didSave: false)
+            /// If there are ongoing media uploads, save with completion processing
+            if MediaCoordinator.shared.isUploadingMedia(for: post) {
+                resumeSaving()
+            } else {
+                dismissOrPopView(didSave: false)
+            }
         } else if post.canSave() {
             showPostHasChangesAlert()
         } else {
             editorSession.end(outcome: .cancel)
             discardUnsavedChangesAndUpdateGUI()
         }
+    }
+
+    private func resumeSaving() {
+        post.shouldAttemptAutoUpload = false
+        let action: PostEditorAction = post.status == .draft ? .update : .publish
+        self.postEditorStateContext.action = action
+        self.publishPost(action: action, dismissWhenDone: true, analyticsStat: nil)
     }
 
     func discardUnsavedChangesAndUpdateGUI() {
@@ -285,7 +431,9 @@ extension PostEditor where Self: UIViewController {
 
             // The post is a local or remote draft
             alertController.addDefaultActionWithTitle(title) { _ in
-                self.publishPost(action: self.editorAction(), dismissWhenDone: true, analyticsStat: self.postEditorStateContext.publishActionAnalyticsStat)
+                let action = self.editorAction()
+                self.postEditorStateContext.action = action
+                self.publishPost(action: action, dismissWhenDone: true, analyticsStat: self.postEditorStateContext.publishActionAnalyticsStat)
             }
         }
 
@@ -295,7 +443,7 @@ extension PostEditor where Self: UIViewController {
             self.discardUnsavedChangesAndUpdateGUI()
         }
 
-        alertController.popoverPresentationController?.barButtonItem = navigationBarManager.closeBarButtonItem
+        alertController.popoverPresentationController?.barButtonItem = alertBarButtonItem
         present(alertController, animated: true, completion: nil)
     }
 
@@ -304,11 +452,15 @@ extension PostEditor where Self: UIViewController {
             return .save
         }
 
-        return post.status == .draft ? .saveAsDraft : .publish
+        if post.isLocalDraft {
+            return .save
+        }
+
+        return post.status == .draft ? .update : .publish
     }
 }
 
-extension PostEditor where Self: UIViewController {
+extension PublishingEditor {
     func presentationController(forPresented presented: UIViewController, presenting: UIViewController?) -> UIPresentationController? {
         guard presented is FancyAlertViewController else {
             return nil
@@ -320,7 +472,7 @@ extension PostEditor where Self: UIViewController {
 
 // MARK: - Publishing
 
-extension PostEditor where Self: UIViewController {
+extension PublishingEditor {
 
     /// Shows the publishing overlay and starts the publishing process.
     ///
@@ -373,7 +525,8 @@ extension PostEditor where Self: UIViewController {
 
         PostCoordinator.shared.save(post)
 
-        dismissOrPopView()
+        let presentBloggingReminders = Feature.enabled(.bloggingReminders) && JetpackNotificationMigrationService.shared.shouldPresentNotifications()
+        dismissOrPopView(presentBloggingReminders: presentBloggingReminders)
 
         self.postEditorStateContext.updated(isBeingPublished: false)
     }
@@ -390,17 +543,36 @@ extension PostEditor where Self: UIViewController {
         post = originalPost
     }
 
-    func dismissOrPopView(didSave: Bool = true) {
+    func dismissOrPopView(didSave: Bool = true, presentBloggingReminders: Bool = false) {
         stopEditing()
 
         WPAppAnalytics.track(.editorClosed, withProperties: [WPAppAnalyticsKeyEditorSource: analyticsEditorSource], with: post)
 
         if let onClose = onClose {
+            // if this closure exists, the presentation of the Blogging Reminders flow (if needed)
+            // needs to happen in the closure.
             onClose(didSave, false)
-        } else if isModal() {
-            presentingViewController?.dismiss(animated: true, completion: nil)
+        } else if isModal(), let controller = presentingViewController {
+            controller.dismiss(animated: true) {
+                if presentBloggingReminders {
+                    BloggingRemindersFlow.present(from: controller,
+                                                  for: self.post.blog,
+                                                  source: .publishFlow,
+                                                  alwaysShow: false)
+                }
+            }
         } else {
-            _ = navigationController?.popViewController(animated: true)
+            navigationController?.popViewController(animated: true)
+            guard let controller = navigationController?.topViewController else {
+                return
+            }
+
+            if presentBloggingReminders {
+                BloggingRemindersFlow.present(from: controller,
+                                              for: self.post.blog,
+                                              source: .publishFlow,
+                                              alwaysShow: false)
+            }
         }
     }
 
@@ -465,6 +637,14 @@ extension PostEditor where Self: UIViewController {
             ContextManager.sharedInstance().save(managedObjectContext)
         }
     }
+
+    var uploadFailureNoticeTag: Notice.Tag {
+        return "PostEditor.UploadFailed"
+    }
+
+    func uploadFailureNotice(action: PostEditorAction) -> Notice {
+        return Notice(title: action.publishingErrorLabel, tag: uploadFailureNoticeTag)
+    }
 }
 
 struct PostEditorDebouncerConstants {
@@ -474,6 +654,12 @@ struct PostEditorDebouncerConstants {
 private struct MediaUploadingAlert {
     static let title = NSLocalizedString("Uploading media", comment: "Title for alert when trying to save/exit a post before media upload process is complete.")
     static let message = NSLocalizedString("You are currently uploading media. Please wait until this completes.", comment: "This is a notification the user receives if they are trying to save a post (or exit) before the media upload process is complete.")
+    static let acceptTitle  = NSLocalizedString("OK", comment: "Accept Action")
+}
+
+private struct PostUploadingAlert {
+    static let title = NSLocalizedString("Uploading post", comment: "Title for alert when trying to preview a post before the uploading process is complete.")
+    static let message = NSLocalizedString("Your post is currently being uploaded. Please wait until this completes.", comment: "This is a notification the user receives if they are trying to preview a post before the upload process is complete.")
     static let acceptTitle  = NSLocalizedString("OK", comment: "Accept Action")
 }
 

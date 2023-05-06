@@ -9,7 +9,7 @@ public protocol ApplicationShortcutsProvider {
 
 extension UIApplication: ApplicationShortcutsProvider {
     @objc public var is3DTouchAvailable: Bool {
-        return keyWindow?.traitCollection.forceTouchCapability == .available
+        return mainWindow?.traitCollection.forceTouchCapability == .available
     }
 }
 
@@ -23,7 +23,6 @@ open class WP3DTouchShortcutCreator: NSObject {
 
     var shortcutsProvider: ApplicationShortcutsProvider
     @objc let mainContext = ContextManager.sharedInstance().mainContext
-    @objc let blogService: BlogService
 
     fileprivate let logInShortcutIconImageName = "icon-shortcut-signin"
     fileprivate let notificationsShortcutIconImageName = "icon-shortcut-notifications"
@@ -33,7 +32,6 @@ open class WP3DTouchShortcutCreator: NSObject {
 
     public init(shortcutsProvider: ApplicationShortcutsProvider) {
         self.shortcutsProvider = shortcutsProvider
-        blogService = BlogService(managedObjectContext: mainContext)
         super.init()
         registerForNotifications()
     }
@@ -78,8 +76,8 @@ open class WP3DTouchShortcutCreator: NSObject {
 
     fileprivate func loggedInShortcutArray() -> [UIApplicationShortcutItem] {
         var defaultBlogName: String?
-        if blogService.blogCountForAllAccounts() > 1 {
-            defaultBlogName = blogService.lastUsedOrFirstBlog()?.settings?.name
+        if Blog.count(in: mainContext) > 1 {
+            defaultBlogName = Blog.lastUsedOrFirst(in: mainContext)?.settings?.name
         }
 
         let notificationsShortcut = UIMutableApplicationShortcutItem(type: WP3DTouchShortcutHandler.ShortcutIdentifier.Notifications.type,
@@ -110,23 +108,27 @@ open class WP3DTouchShortcutCreator: NSObject {
     }
 
     @objc fileprivate func createLoggedInShortcuts() {
+
         DispatchQueue.main.async {[weak self]() in
             guard let strongSelf = self else {
                 return
             }
             let entireShortcutArray = strongSelf.loggedInShortcutArray()
             var visibleShortcutArray = [UIApplicationShortcutItem]()
+            let jetpackFeaturesEnabled = JetpackFeaturesRemovalCoordinator.jetpackFeaturesEnabled()
 
-            if strongSelf.hasWordPressComAccount() {
+            if jetpackFeaturesEnabled && strongSelf.hasWordPressComAccount() {
                 visibleShortcutArray.append(entireShortcutArray[LoggedIn3DTouchShortcutIndex.notifications.rawValue])
             }
 
-            if strongSelf.doesCurrentBlogSupportStats() {
+            if jetpackFeaturesEnabled && strongSelf.doesCurrentBlogSupportStats() {
                 visibleShortcutArray.append(entireShortcutArray[LoggedIn3DTouchShortcutIndex.stats.rawValue])
             }
 
-            visibleShortcutArray.append(entireShortcutArray[LoggedIn3DTouchShortcutIndex.newPhotoPost.rawValue])
-            visibleShortcutArray.append(entireShortcutArray[LoggedIn3DTouchShortcutIndex.newPost.rawValue])
+            if AppConfiguration.allowsNewPostShortcut {
+                visibleShortcutArray.append(entireShortcutArray[LoggedIn3DTouchShortcutIndex.newPhotoPost.rawValue])
+                visibleShortcutArray.append(entireShortcutArray[LoggedIn3DTouchShortcutIndex.newPost.rawValue])
+            }
 
             strongSelf.shortcutsProvider.shortcutItems = visibleShortcutArray
         }
@@ -141,7 +143,7 @@ open class WP3DTouchShortcutCreator: NSObject {
     }
 
     fileprivate func is3DTouchAvailable() -> Bool {
-        let window = UIApplication.shared.keyWindow
+        let window = UIApplication.shared.mainWindow
 
         return window?.traitCollection.forceTouchCapability == .available
     }
@@ -151,7 +153,7 @@ open class WP3DTouchShortcutCreator: NSObject {
     }
 
     fileprivate func doesCurrentBlogSupportStats() -> Bool {
-        guard let currentBlog = blogService.lastUsedOrFirstBlog() else {
+        guard let currentBlog = Blog.lastUsedOrFirst(in: mainContext) else {
             return false
         }
 
@@ -159,6 +161,6 @@ open class WP3DTouchShortcutCreator: NSObject {
     }
 
     fileprivate func hasBlog() -> Bool {
-        return blogService.blogCountForAllAccounts() > 0
+        return Blog.count(in: mainContext) > 0
     }
 }

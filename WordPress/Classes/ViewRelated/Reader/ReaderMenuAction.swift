@@ -4,20 +4,37 @@ final class ReaderMenuAction {
     init(logged: Bool) {
         isLoggedIn = logged
     }
-    func execute(post: ReaderPost, context: NSManagedObjectContext, readerTopic: ReaderAbstractTopic?, anchor: UIView, vc: UIViewController) {
-        guard post.isFollowing else {
-            showMenuForPost(post, context: context, readerTopic: readerTopic, fromView: anchor, vc: vc)
-            return
-        }
 
-        let service = ReaderTopicService(managedObjectContext: context)
-        if let topic = service.findSiteTopic(withSiteID: post.siteID) {
-            showMenuForPost(post, context: context, topic: topic, readerTopic: readerTopic, fromView: anchor, vc: vc)
-            return
-        }
+    func execute(post: ReaderPost,
+                 context: NSManagedObjectContext,
+                 readerTopic: ReaderAbstractTopic? = nil,
+                 anchor: UIView,
+                 vc: UIViewController,
+                 source: ReaderPostMenuSource,
+                 followCommentsService: FollowCommentsService
+    ) {
+        self.execute(post: post, context: context, anchor: .view(anchor), vc: vc, source: source, followCommentsService: followCommentsService)
     }
 
-    fileprivate func showMenuForPost(_ post: ReaderPost, context: NSManagedObjectContext, topic: ReaderSiteTopic? = nil, readerTopic: ReaderAbstractTopic?, fromView anchorView: UIView, vc: UIViewController) {
-        ReaderShowMenuAction(loggedIn: isLoggedIn).execute(with: post, context: context, topic: topic, readerTopic: readerTopic, anchor: anchorView, vc: vc)
+    func execute(post: ReaderPost,
+                 context: NSManagedObjectContext,
+                 readerTopic: ReaderAbstractTopic? = nil,
+                 anchor: ReaderShowMenuAction.PopoverAnchor,
+                 vc: UIViewController,
+                 source: ReaderPostMenuSource,
+                 followCommentsService: FollowCommentsService
+    ) {
+        let siteTopic: ReaderSiteTopic? = post.isFollowing ? (try? ReaderSiteTopic.lookup(withSiteID: post.siteID, in: context)) : nil
+
+        ReaderShowMenuAction(loggedIn: isLoggedIn).execute(
+            with: post,
+            context: context,
+            siteTopic: siteTopic,
+            readerTopic: readerTopic,
+            anchor: anchor,
+            vc: vc,
+            source: source,
+            followCommentsService: followCommentsService
+        )
     }
 }

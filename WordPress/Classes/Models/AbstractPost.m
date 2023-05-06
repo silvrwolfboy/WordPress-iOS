@@ -1,6 +1,6 @@
 #import "AbstractPost.h"
 #import "Media.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "WordPress-Swift.h"
 #import "BasePost.h"
 @import WordPressKit;
@@ -402,6 +402,11 @@
     return [self.status isEqualToString:PostStatusDraft];
 }
 
+- (BOOL)isPublished
+{
+    return [self.status isEqualToString:PostStatusPublish];
+}
+
 - (BOOL)originalIsDraft
 {
     if ([self.status isEqualToString:PostStatusDraft]) {
@@ -420,7 +425,7 @@
 
 - (BOOL)shouldPublishImmediately
 {
-    return [self originalIsDraft] && ![self hasFuturePublishDate];
+    return [self originalIsDraft] && [self dateCreatedIsNilOrEqualToDateModified];
 }
 
 - (NSString *)authorNameForDisplay
@@ -475,9 +480,9 @@
     return [self.blog supports:BlogFeatureStats] && [self hasRemote];
 }
 
-- (BOOL)isPrivate
+- (BOOL)isPrivateAtWPCom
 {
-    return self.blog.isPrivate;
+    return self.blog.isPrivateAtWPCom;
 }
 
 - (BOOL)isMultiAuthorBlog
@@ -568,6 +573,17 @@
 
     if (!([self.wp_slug length] == 0 && [original.wp_slug length] == 0)
         && (![self.wp_slug isEqual:original.wp_slug]))
+    {
+        return YES;
+    }
+
+    if ( ((self.featuredImage != nil) && ![self.featuredImage.objectID isEqual: original.featuredImage.objectID]) ||
+        (self.featuredImage == nil && self.original.featuredImage != nil) ) {
+        return YES;
+    }
+
+    if ((self.authorID != original.authorID)
+        && (![self.authorID isEqual:original.authorID]))
     {
         return YES;
     }

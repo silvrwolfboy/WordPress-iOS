@@ -31,7 +31,7 @@ import WordPressFlux
 ///
 /// - SeeAlso: `NoticeStore`
 /// - SeeAlso: `NoticeAction`
-class NoticePresenter: NSObject {
+class NoticePresenter {
     /// Used for tracking the currently displayed Notice and its corresponding view.
     private struct NoticePresentation {
         let notice: Notice
@@ -44,6 +44,7 @@ class NoticePresenter: NSObject {
     }
 
     private let store: NoticeStore
+    private let animator: NoticeAnimator
     private let window: UntouchableWindow
     private var view: UIView {
         guard let view = window.rootViewController?.view else {
@@ -58,11 +59,13 @@ class NoticePresenter: NSObject {
     private var currentNoticePresentation: NoticePresentation?
     private var currentKeyboardPresentation: KeyboardPresentation = .notPresent
 
-    private init(store: NoticeStore) {
+    init(store: NoticeStore = StoreContainer.shared.notice,
+         animator: NoticeAnimator = NoticeAnimator(duration: Animations.appearanceDuration, springDampening: Animations.appearanceSpringDamping, springVelocity: NoticePresenter.Animations.appearanceSpringVelocity)) {
         self.store = store
+        self.animator = animator
 
         let windowFrame: CGRect
-        if let mainWindow = UIApplication.shared.keyWindow {
+        if let mainWindow = UIApplication.shared.mainWindow {
             windowFrame = mainWindow.offsetToAvoidStatusBar()
         } else {
             windowFrame = .zero
@@ -73,8 +76,6 @@ class NoticePresenter: NSObject {
         // however, since the alerts aren't permanently on screen, this isn't
         // often a problem.
         window.windowLevel = .alert
-
-        super.init()
 
         // Keep the window visible but hide it on the next run loop. If we hide it immediately,
         // the window is not automatically resized when the device is rotated. This issue
@@ -91,10 +92,6 @@ class NoticePresenter: NSObject {
 
         listenToKeyboardEvents()
         listenToOrientationChangeEvents()
-    }
-
-    override convenience init() {
-        self.init(store: StoreContainer.shared.notice)
     }
 
     // MARK: - Events
@@ -115,7 +112,7 @@ class NoticePresenter: NSObject {
             }
 
             UIView.animate(withDuration: durationValue.doubleValue, animations: {
-                currentContainer.bottomConstraint?.constant = self.onscreenNoticeContainerBottomConstraintConstant
+                currentContainer.bottomConstraint?.constant = self.onScreenNoticeContainerBottomConstraintConstant
                 self.view.layoutIfNeeded()
             })
         }
@@ -130,7 +127,7 @@ class NoticePresenter: NSObject {
             }
 
             UIView.animate(withDuration: durationValue.doubleValue, animations: {
-                currentContainer.bottomConstraint?.constant = self.onscreenNoticeContainerBottomConstraintConstant
+                currentContainer.bottomConstraint?.constant = self.onScreenNoticeContainerBottomConstraintConstant
                 self.view.layoutIfNeeded()
             })
         }
@@ -140,7 +137,7 @@ class NoticePresenter: NSObject {
     /// device is rotated.
     private func listenToOrientationChangeEvents() {
         let nc = NotificationCenter.default
-        nc.addObserver(forName: UIDevice.orientationDidChangeNotification, object: nil, queue: nil) { [weak self] _ in
+        nc.addObserver(forName: NSNotification.Name.WPTabBarHeightChanged, object: nil, queue: nil) { [weak self] _ in
             guard let self = self,
                 let containerView = self.currentNoticePresentation?.containerView else {
                     return
@@ -218,6 +215,12 @@ class NoticePresenter: NSObject {
         let noticeContainerView = NoticeContainerView(noticeView: noticeView)
         addNoticeContainerToPresentingViewController(noticeContainerView)
         addBottomConstraintToNoticeContainer(noticeContainerView)
+        addTopConstraintToNoticeContainer(noticeContainerView)
+
+        // At regular width, the notice shouldn't be any wider than 1/2 the app's width
+        noticeContainerView.noticeWidthConstraint = noticeView.widthAnchor.constraint(equalTo: noticeContainerView.widthAnchor, multiplier: 0.5)
+        let isRegularWidth = noticeContainerView.traitCollection.containsTraits(in: UITraitCollection(horizontalSizeClass: .regular))
+        noticeContainerView.noticeWidthConstraint?.isActive = isRegularWidth
 
         NSLayoutConstraint.activate([
             noticeContainerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -238,9 +241,12 @@ class NoticePresenter: NSObject {
         // Mask must be initialized after the window is shown or the view.frame will be zero
         view.mask = MaskView(parent: view, untouchableViewController: self.window.untouchableViewController)
 
-        let fromState = offscreenState(for: noticeContainerView)
-        let toState = onscreenState(for: noticeContainerView)
-        animatePresentation(fromState: fromState, toState: toState, completion: {
+        let offScreenBottomOffset = offScreenNoticeContainerBottomOffset(for: noticeContainerView)
+        let fromState = animator.state(for: noticeContainerView, in: view, withTransition: .offscreen,
+                                          bottomOffset: offScreenBottomOffset)
+        let toState = animator.state(for: noticeContainerView, in: view, withTransition: .onscreen,
+                                        bottomOffset: onScreenNoticeContainerBottomConstraintConstant)
+        animator.animatePresentation(fromState: fromState, toState: toState, completion: {
             // Quick Start notices don't get automatically dismissed
             guard notice.style.isDismissable else {
                 return
@@ -261,18 +267,42 @@ class NoticePresenter: NSObject {
     private func addBottomConstraintToNoticeContainer(_ container: NoticeContainerView) {
         let constraint = container.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         container.bottomConstraint = constraint
-        constraint.isActive = true
+        constraint.isActive = false
+    }
+
+    private func addTopConstraintToNoticeContainer(_ container: NoticeContainerView) {
+        let constraint = container.topAnchor.constraint(equalTo: view.bottomAnchor)
+        container.topConstraint = constraint
+        constraint.priority = UILayoutPriority.defaultHigh
+        constraint.isActive = false
     }
 
     // MARK: - Dismissal
+
+    public class func dismiss(container: NoticeContainerView) {
+        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + .nanoseconds(1)) {
+            UIView.animate(withDuration: Animations.appearanceDuration,
+                           delay: 0,
+                           usingSpringWithDamping: Animations.appearanceSpringDamping,
+                           initialSpringVelocity: Animations.appearanceSpringVelocity,
+                           options: [],
+                           animations: {
+                    container.noticeView.alpha = WPAlphaZero
+            },
+                           completion: { _ in
+                    container.removeFromSuperview()
+            })
+        }
+    }
 
     private func dismissForegroundNotice() {
         guard let container = currentNoticePresentation?.containerView,
             container.superview != nil else {
                 return
         }
-
-        animatePresentation(fromState: {}, toState: offscreenState(for: container), completion: { [weak self] in
+        let bottomOffset = offScreenNoticeContainerBottomOffset(for: container)
+        let toState = animator.state(for: container, in: view, withTransition: .offscreen, bottomOffset: bottomOffset)
+        animator.animatePresentation(fromState: {}, toState: toState, completion: { [weak self] in
             container.removeFromSuperview()
 
             // It is possible that when the dismiss animation finished, another Notice was already
@@ -287,42 +317,7 @@ class NoticePresenter: NSObject {
 
     // MARK: - Animations
 
-    typealias AnimationBlock = () -> Void
-
-    private func offscreenState(for noticeContainer: NoticeContainerView) -> AnimationBlock {
-        return { [weak self] in
-            guard let self = self else {
-                return
-            }
-
-            noticeContainer.noticeView.alpha = WPAlphaZero
-            noticeContainer.bottomConstraint?.constant = {
-                switch self.currentKeyboardPresentation {
-                case .present(let keyboardHeight):
-                    return -keyboardHeight + noticeContainer.bounds.height
-                case .notPresent:
-                    return self.window.untouchableViewController.offsetOffscreen
-                }
-            }()
-
-            self.view.layoutIfNeeded()
-        }
-    }
-
-    private func onscreenState(for noticeContainer: NoticeContainerView) -> AnimationBlock {
-        return { [weak self] in
-            guard let self = self else {
-                return
-            }
-
-            noticeContainer.noticeView.alpha = WPAlphaFull
-            noticeContainer.bottomConstraint?.constant = self.onscreenNoticeContainerBottomConstraintConstant
-
-            self.view.layoutIfNeeded()
-        }
-    }
-
-    private var onscreenNoticeContainerBottomConstraintConstant: CGFloat {
+    private var onScreenNoticeContainerBottomConstraintConstant: CGFloat {
         switch self.currentKeyboardPresentation {
         case .present(let keyboardHeight):
             return -keyboardHeight
@@ -331,22 +326,12 @@ class NoticePresenter: NSObject {
         }
     }
 
-    private func animatePresentation(fromState: AnimationBlock,
-                                     toState: @escaping AnimationBlock,
-                                     completion: @escaping AnimationBlock) {
-        fromState()
-
-        // this delay avoids affecting other transitions like navigation pushes
-        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + .nanoseconds(1)) {
-            UIView.animate(withDuration: Animations.appearanceDuration,
-                           delay: 0,
-                           usingSpringWithDamping: Animations.appearanceSpringDamping,
-                           initialSpringVelocity: Animations.appearanceSpringVelocity,
-                           options: [],
-                           animations: toState,
-                           completion: { _ in
-                            completion()
-            })
+    private func offScreenNoticeContainerBottomOffset(for container: UIView) -> CGFloat {
+        switch self.currentKeyboardPresentation {
+        case .present(let keyboardHeight):
+            return -keyboardHeight + container.bounds.height
+        case .notPresent:
+            return window.untouchableViewController.offsetOffscreen
         }
     }
 
@@ -376,14 +361,16 @@ private extension UIWindow {
 /// Small wrapper view that ensures a notice remains centered and at a maximum
 /// width when displayed in a regular size class.
 ///
-private class NoticeContainerView: UIView {
+class NoticeContainerView: UIView {
     /// The space between the Notice and its parent View
     private let containerMargin = UIEdgeInsets(top: 8.0, left: 8.0, bottom: 15.0, right: 8.0)
     var bottomConstraint: NSLayoutConstraint?
+    var topConstraint: NSLayoutConstraint?
+    var noticeWidthConstraint: NSLayoutConstraint?
 
-    let noticeView: UIView
+    let noticeView: NoticeView
 
-    init(noticeView: UIView) {
+    init(noticeView: NoticeView) {
         self.noticeView = noticeView
 
         super.init(frame: .zero)
@@ -422,16 +409,11 @@ private class NoticeContainerView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    lazy var noticeWidthConstraint: NSLayoutConstraint = {
-        // At regular width, the notice shouldn't be any wider than 1/2 the app's width
-        return noticeView.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.5)
-    }()
-
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
 
         let isRegularWidth = traitCollection.containsTraits(in: UITraitCollection(horizontalSizeClass: .regular))
-        noticeWidthConstraint.isActive = isRegularWidth
+        noticeWidthConstraint?.isActive = isRegularWidth
 
         layoutIfNeeded()
     }

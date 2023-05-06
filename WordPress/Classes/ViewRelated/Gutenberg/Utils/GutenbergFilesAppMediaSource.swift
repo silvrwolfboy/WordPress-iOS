@@ -11,14 +11,21 @@ class GutenbergFilesAppMediaSource: NSObject {
         self.gutenberg = gutenberg
     }
 
-    func presentPicker(origin: UIViewController, filters: [Gutenberg.MediaType], multipleSelection: Bool, callback: @escaping MediaPickerDidPickMediaCallback) {
-        let uttypeFilters = filters.compactMap { $0.typeIdentifier }
+    func presentPicker(origin: UIViewController, filters: [Gutenberg.MediaType], allowedTypesOnBlog: [String], multipleSelection: Bool, callback: @escaping MediaPickerDidPickMediaCallback) {
         mediaPickerCallback = callback
-        let docPicker = UIDocumentPickerViewController(documentTypes: uttypeFilters, in: .import)
+        let documentTypes = getDocumentTypes(filters: filters, allowedTypesOnBlog: allowedTypesOnBlog)
+        let docPicker = UIDocumentPickerViewController(documentTypes: documentTypes, in: .import)
         docPicker.delegate = self
         docPicker.allowsMultipleSelection = multipleSelection
-        WPStyleGuide.configureDocumentPickerNavBarAppearance()
         origin.present(docPicker, animated: true)
+    }
+
+    private func getDocumentTypes(filters: [Gutenberg.MediaType], allowedTypesOnBlog: [String]) -> [String] {
+        if filters.contains(.any) {
+            return allowedTypesOnBlog
+        } else {
+            return filters.map { $0.filterTypesConformingTo(allTypes: allowedTypesOnBlog) }.reduce([], +)
+        }
     }
 }
 
@@ -27,46 +34,71 @@ extension GutenbergFilesAppMediaSource: UIDocumentPickerDelegate {
         defer {
             mediaPickerCallback = nil
         }
-        if let documentURL = urls.first {
-            insertOnBlock(with: documentURL)
-        } else {
+        if urls.count == 0 {
             mediaPickerCallback?(nil)
+        } else {
+            insertOnBlock(with: urls)
         }
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-        WPStyleGuide.configureNavigationAppearance()
         mediaPickerCallback?(nil)
         mediaPickerCallback = nil
     }
 
-    /// Adds the given image object to the requesting Image Block
-    /// - Parameter asset: Stock Media object to add.
-    func insertOnBlock(with url: URL) {
-        WPStyleGuide.configureNavigationAppearance()
+    func insertOnBlock(with urls: [URL]) {
         guard let callback = mediaPickerCallback else {
             return assertionFailure("Image picked without callback")
         }
 
-        guard let media = self.mediaInserter.insert(exportableAsset: url as NSURL, source: .otherApps) else {
-            return callback([])
-        }
+        let mediaInfo = urls.compactMap({ (url) -> MediaInfo? in
+            guard let media = mediaInserter.insert(exportableAsset: url as NSURL, source: .otherApps) else {
+                return nil
+            }
+            let mediaUploadID = media.gutenbergUploadID
+            return MediaInfo(id: mediaUploadID, url: url.absoluteString, type: media.mediaTypeString, title: url.lastPathComponent)
+        })
 
-        let mediaUploadID = media.gutenbergUploadID
-        callback([MediaInfo(id: mediaUploadID, url: url.absoluteString, type: media.mediaTypeString)])
+        callback(mediaInfo)
     }
 }
 
 extension Gutenberg.MediaType {
-    var typeIdentifier: String? {
+    func filterTypesConformingTo(allTypes: [String]) -> [String] {
+        guard let uttype = typeIdentifier else {
+            return []
+        }
+        return getTypesFrom(allTypes, conformingTo: uttype)
+    }
+
+    private func getTypesFrom(_ allTypes: [String], conformingTo uttype: CFString) -> [String] {
+        guard let requiredType = UTType(uttype as String) else {
+            return []
+        }
+
+        return allTypes.filter {
+            guard let allowedType = UTType($0) else {
+                return false
+            }
+            // Sometimes the compared type could be a supertype
+            // For example a self-hosted site without Jetpack may have "public.content" as allowedType
+            // Although "public.audio" conforms to "public.content", it's not true the other way around
+            if allowedType.isSupertype(of: requiredType) {
+                return true
+            }
+            return allowedType.conforms(to: requiredType)
+        }
+    }
+
+    private var typeIdentifier: CFString? {
         switch self {
         case .image:
-            return String(kUTTypeImage)
+            return kUTTypeImage
         case .video:
-            return String(kUTTypeMovie)
+            return kUTTypeMovie
         case .audio:
-            return String(kUTTypeAudio)
-        case .other:
+            return kUTTypeAudio
+        case .other, .any: // needs to be specified by the blog's allowed types.
             return nil
         }
     }

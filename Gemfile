@@ -1,13 +1,24 @@
-source 'https://rubygems.org' do
-  gem 'rake'
-  gem 'cocoapods', '~> 1.8.0'
-  gem 'xcpretty-travis-formatter'
-  gem 'octokit', "~> 4.0"
-  gem 'fastlane', "2.141.0"
-  gem 'dotenv'
-  gem 'rubyzip', "~> 1.3"
-  gem 'commonmarker'
-end
+# frozen_string_literal: true
 
-plugins_path = File.join(File.dirname(__FILE__), 'Scripts/fastlane', 'Pluginfile')
-eval_gemfile(plugins_path) if File.exist?(plugins_path)
+source 'https://rubygems.org'
+
+gem 'cocoapods', '~> 1.11'
+gem 'commonmarker'
+gem 'danger', '~> 8.6'
+gem 'danger-rubocop', '~> 0.10'
+gem 'dotenv'
+gem 'fastlane', '~> 2.174'
+gem 'fastlane-plugin-appcenter', '~> 1.8'
+gem 'fastlane-plugin-sentry'
+# This comment avoids typing to switch to a development version for testing.
+# gem 'fastlane-plugin-wpmreleasetoolkit', git: 'git@github.com:wordpress-mobile/release-toolkit', branch: 'trunk'
+gem 'fastlane-plugin-wpmreleasetoolkit', '~> 7.0'
+gem 'octokit', '~> 4.0'
+gem 'rake'
+gem 'rubocop', '~> 1.30'
+gem 'rubocop-rake', '~> 0.6'
+gem 'xcpretty-travis-formatter'
+
+group :screenshots, optional: true do
+  gem 'rmagick', '~> 3.2.0'
+end

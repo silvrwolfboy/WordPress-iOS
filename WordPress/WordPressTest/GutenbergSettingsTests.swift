@@ -1,10 +1,8 @@
 import XCTest
 @testable import WordPress
 
-class GutenbergSettingsTests: XCTestCase {
+class GutenbergSettingsTests: CoreDataTestCase {
 
-    fileprivate var contextManager: TestContextManager!
-    fileprivate var context: NSManagedObjectContext!
     private let gutenbergContent = "<!-- wp:paragraph -->\n<p>Hello world</p>\n<!-- /wp:paragraph -->"
 
     var database: EphemeralKeyValueDatabase!
@@ -13,19 +11,19 @@ class GutenbergSettingsTests: XCTestCase {
     var post: Post!
 
     fileprivate func newTestPost(with blog: Blog) -> Post {
-        let post = NSEntityDescription.insertNewObject(forEntityName: Post.entityName(), into: context) as! Post
+        let post = NSEntityDescription.insertNewObject(forEntityName: Post.entityName(), into: mainContext) as! Post
         post.blog = blog
         return post
     }
 
     private func newTestBlog(isWPComAPIEnabled: Bool = true) -> Blog {
         if isWPComAPIEnabled {
-            let blog = ModelTestHelper.insertDotComBlog(context: context)
+            let blog = ModelTestHelper.insertDotComBlog(context: mainContext)
             blog.account?.authToken = "auth"
             blog.dotComID = 1
             return blog
         } else {
-            return ModelTestHelper.insertSelfHostedBlog(context: context)
+            return ModelTestHelper.insertSelfHostedBlog(context: mainContext)
         }
     }
 
@@ -43,9 +41,6 @@ class GutenbergSettingsTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        contextManager = TestContextManager()
-        context = NSManagedObjectContext(concurrencyType: .mainQueueConcurrencyType)
-        context.parent = contextManager.mainContext
         Environment.replaceEnvironment(contextManager: contextManager)
         database = EphemeralKeyValueDatabase()
         settings = GutenbergSettings(database: database)
@@ -55,8 +50,6 @@ class GutenbergSettingsTests: XCTestCase {
     }
 
     override func tearDown() {
-        context.rollback()
-        ContextManager.overrideSharedInstance(nil)
         TestAnalyticsTracker.tearDown()
         super.tearDown()
     }
@@ -113,84 +106,84 @@ class GutenbergSettingsTests: XCTestCase {
 
     // Thests for defaults when `mobile_editor` haven't been sync from remote
 
-    func testSelfHostedDefaultsToAztec() {
+    func testSelfHostedDefaultsToGutenberg() {
         blog = newTestBlog(isWPComAPIEnabled: false)
         post = newTestPost(with: blog)
-        XCTAssertFalse(mustUseGutenberg)
+        XCTAssertTrue(mustUseGutenberg)
     }
 
-    func testWPComAccountsDefaultsToAztec() {
-        XCTAssertFalse(mustUseGutenberg)
+    func testWPComAccountsDefaultsToGutenberg() {
+        XCTAssertTrue(mustUseGutenberg)
     }
 
     // MARK: - Tracks tests
 
     func testTracksOnBlockPostOpening() {
-        settings.setGutenbergEnabled(true, for: blog, source: .onBlockPostOpening)
+        settings.setGutenbergEnabled(false, for: blog, source: .onBlockPostOpening)
 
         XCTAssertEqual(TestAnalyticsTracker.tracked.count, 1)
 
         let trackEvent = TestAnalyticsTracker.tracked.first
-        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergEnabled)
+        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergDisabled)
 
         let property = trackEvent?.properties["source"] as? String
         XCTAssertEqual(property, GutenbergSettings.TracksSwitchSource.onBlockPostOpening.rawValue)
     }
 
     func testTracksOnSiteCreation() {
-        settings.softSetGutenbergEnabled(true, for: blog, source: .onSiteCreation)
+        settings.softSetGutenbergEnabled(false, for: blog, source: .onSiteCreation)
 
         XCTAssertEqual(TestAnalyticsTracker.tracked.count, 1)
 
         let trackEvent = TestAnalyticsTracker.tracked.first
-        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergEnabled)
+        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergDisabled)
 
         let property = trackEvent?.properties["source"] as? String
         XCTAssertEqual(property, GutenbergSettings.TracksSwitchSource.onSiteCreation.rawValue)
     }
 
     func testTracksViaSiteSettings() {
-        settings.setGutenbergEnabled(true, for: blog, source: .viaSiteSettings)
+        settings.setGutenbergEnabled(false, for: blog, source: .viaSiteSettings)
 
         XCTAssertEqual(TestAnalyticsTracker.tracked.count, 1)
 
         let trackEvent = TestAnalyticsTracker.tracked.first
-        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergEnabled)
+        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergDisabled)
 
         let property = trackEvent?.properties["source"] as? String
         XCTAssertEqual(property, GutenbergSettings.TracksSwitchSource.viaSiteSettings.rawValue)
     }
 
     func testTracksEventOnlyOnceWhenEditorDoesNotChange() {
-        settings.softSetGutenbergEnabled(true, for: blog, source: .onSiteCreation)
-        settings.setGutenbergEnabled(true, for: blog, source: .viaSiteSettings)
-        settings.setGutenbergEnabled(true, for: blog, source: .onBlockPostOpening)
+        settings.softSetGutenbergEnabled(false, for: blog, source: .onSiteCreation)
+        settings.setGutenbergEnabled(false, for: blog, source: .viaSiteSettings)
+        settings.setGutenbergEnabled(false, for: blog, source: .onBlockPostOpening)
 
         XCTAssertEqual(TestAnalyticsTracker.tracked.count, 1)
 
         let trackEvent = TestAnalyticsTracker.tracked.first
-        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergEnabled)
+        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergDisabled)
 
         let property = trackEvent?.properties["source"] as? String
         XCTAssertEqual(property, GutenbergSettings.TracksSwitchSource.onSiteCreation.rawValue)
     }
 
     func testTracksSwitchEventOnAndOff() {
-        settings.setGutenbergEnabled(true, for: blog, source: .viaSiteSettings)
         settings.setGutenbergEnabled(false, for: blog, source: .viaSiteSettings)
+        settings.setGutenbergEnabled(true, for: blog, source: .viaSiteSettings)
 
         XCTAssertEqual(TestAnalyticsTracker.tracked.count, 2)
 
         // First event (Switch ON)
         var trackEvent = TestAnalyticsTracker.tracked.first
-        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergEnabled)
+        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergDisabled)
 
         var property = trackEvent?.properties["source"] as? String
         XCTAssertEqual(property, GutenbergSettings.TracksSwitchSource.viaSiteSettings.rawValue)
 
         // Second event (Switch OFF)
         trackEvent = TestAnalyticsTracker.tracked.last
-        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergDisabled)
+        XCTAssertEqual(trackEvent?.stat, WPAnalyticsStat.appSettingsGutenbergEnabled)
 
         property = trackEvent?.properties["source"] as? String
         XCTAssertEqual(property, GutenbergSettings.TracksSwitchSource.viaSiteSettings.rawValue)
@@ -199,6 +192,13 @@ class GutenbergSettingsTests: XCTestCase {
     // MARK: - Tests for Autoenabling gutenberg
 
     // Autoenable on new installs
+
+    func testDoNotAutoenableWithTrailingSlashURL() {
+        blog.url = "https://wordpress.com/" // From site creation flow
+        settings.setGutenbergEnabled(true, for: blog)
+        blog.url = "https://wordpress.com" // After refreshing with remote
+        XCTAssertFalse(shouldAutoenableGutenberg)
+    }
 
     func testDoNotAutoenableIfUsersSwitchesToGutenberg() {
         settings.setGutenbergEnabled(true, for: blog)
@@ -329,11 +329,11 @@ class GutenbergSettingsTests: XCTestCase {
     }
 
     func setupAccount(withId userId: Int) {
-        let account = ModelTestHelper.insertAccount(context: context)
+        let account = ModelTestHelper.insertAccount(context: mainContext)
         account.authToken = "auth"
         account.uuid = UUID().uuidString
         account.userID = NSNumber(value: userId)
-        contextManager.saveContextAndWait(context)
-        AccountService(managedObjectContext: context).setDefaultWordPressComAccount(account)
+        contextManager.saveContextAndWait(mainContext)
+        AccountService(coreDataStack: contextManager).setDefaultWordPressComAccount(account)
     }
 }

@@ -1,10 +1,28 @@
 import XCTest
 @testable import WordPress
 
-fileprivate enum MockFeatureFlag: OverrideableFlag {
+enum MockFeatureFlag: OverridableFlag {
     case enabledFeature
     case disabledFeature
     case nonOverrideableFeature
+
+    case remotelyEnabledLocallyEnabledFeature
+    case remotelyEnabledLocallyDisabledFeature
+    case remotelyDisabledLocallyEnabledFeature
+    case remotelyDisabledLocallyDisabledFeature
+    case remotelyUndefinedLocallyEnabledFeature
+    case remotelyUndefinedLocallyDisabledFeature
+
+    static var remoteCases: [MockFeatureFlag] {
+        return [
+            .remotelyEnabledLocallyEnabledFeature,
+            .remotelyEnabledLocallyDisabledFeature,
+            .remotelyDisabledLocallyEnabledFeature,
+            .remotelyDisabledLocallyDisabledFeature,
+            .remotelyUndefinedLocallyEnabledFeature,
+            .remotelyUndefinedLocallyDisabledFeature,
+        ]
+    }
 
     var enabled: Bool {
         switch self {
@@ -14,11 +32,23 @@ fileprivate enum MockFeatureFlag: OverrideableFlag {
             return false
         case .nonOverrideableFeature:
             return true
+        case .remotelyEnabledLocallyEnabledFeature,
+             .remotelyDisabledLocallyEnabledFeature,
+             .remotelyUndefinedLocallyEnabledFeature:
+            return true
+        case .remotelyEnabledLocallyDisabledFeature,
+             .remotelyDisabledLocallyDisabledFeature,
+             .remotelyUndefinedLocallyDisabledFeature:
+            return false
         }
     }
 
     var canOverride: Bool {
         return self != .nonOverrideableFeature
+    }
+
+    var originalValue: Bool {
+        return enabled
     }
 
     var description: String {
@@ -29,7 +59,58 @@ fileprivate enum MockFeatureFlag: OverrideableFlag {
             return "Disabled feature"
         case .nonOverrideableFeature:
             return "Non overrideable feature"
+        case .remotelyEnabledLocallyEnabledFeature:
+            return "Remotely Enabled, Locally Enabled Feature"
+        case .remotelyEnabledLocallyDisabledFeature:
+            return "Remote Enabled, Locally Disabled Feature"
+        case .remotelyDisabledLocallyEnabledFeature:
+            return "Remotely Disabled, Locally Enabled Feature"
+        case .remotelyDisabledLocallyDisabledFeature:
+            return "Remotely Disabled, Locally Disabled Feature"
+        case .remotelyUndefinedLocallyEnabledFeature:
+            return "Locally Enabled Feature with no corresponding remote key"
+        case .remotelyUndefinedLocallyDisabledFeature:
+            return "Locally Disabled Feature with no corresponding remote key"
         }
+    }
+
+    var remoteKey: String {
+        switch self {
+        case .remotelyEnabledLocallyEnabledFeature,
+             .remotelyEnabledLocallyDisabledFeature,
+             .remotelyDisabledLocallyEnabledFeature,
+             .remotelyDisabledLocallyDisabledFeature:
+            return self.description
+        case .remotelyUndefinedLocallyEnabledFeature,
+             .remotelyUndefinedLocallyDisabledFeature:
+            return "undefined"
+        default:
+            return "undefined"
+        }
+    }
+
+    var remoteValue: Bool? {
+        switch self {
+        case .remotelyEnabledLocallyEnabledFeature,
+             .remotelyEnabledLocallyDisabledFeature:
+            return true
+        case .remotelyDisabledLocallyEnabledFeature,
+             .remotelyDisabledLocallyDisabledFeature:
+            return false
+        case .remotelyUndefinedLocallyEnabledFeature,
+             .remotelyUndefinedLocallyDisabledFeature:
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    var toFeatureFlag: WordPressKit.FeatureFlag? {
+        guard let remoteValue = remoteValue else {
+            return nil
+        }
+
+        return WordPressKit.FeatureFlag(title: remoteKey, value: remoteValue)
     }
 }
 

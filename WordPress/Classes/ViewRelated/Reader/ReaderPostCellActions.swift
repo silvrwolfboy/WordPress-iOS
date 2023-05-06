@@ -3,10 +3,21 @@ class ReaderPostCellActions: NSObject, ReaderPostCellDelegate {
     private let context: NSManagedObjectContext
     private weak var origin: UIViewController?
     private let topic: ReaderAbstractTopic?
+    private var followCommentsService: FollowCommentsService?
 
     var imageRequestAuthToken: String? = nil
     var isLoggedIn: Bool = false
-    private let visibleConfirmation: Bool
+    var visibleConfirmation: Bool {
+        didSet {
+            saveForLaterAction?.visibleConfirmation = visibleConfirmation
+        }
+    }
+
+    private weak var saveForLaterAction: ReaderSaveForLaterAction?
+
+    /// Saved posts that have been removed but not yet discarded
+    var removedPosts = ReaderSaveForLaterRemovedPosts()
+    weak var savedPostsDelegate: ReaderSavedPostCellActionsDelegate?
 
     init(context: NSManagedObjectContext, origin: UIViewController, topic: ReaderAbstractTopic? = nil, visibleConfirmation: Bool = true) {
         self.context = context
@@ -27,7 +38,16 @@ class ReaderPostCellActions: NSObject, ReaderPostCellDelegate {
         guard let post = provider as? ReaderPost, let origin = origin else {
             return
         }
-        ReaderCommentAction().execute(post: post, origin: origin)
+
+        if let controller = origin as? ReaderStreamViewController,
+           let indexPath = controller.tableView.indexPath(for: cell),
+           let topic = controller.readerTopic,
+           ReaderHelpers.topicIsDiscover(topic),
+           controller.shouldShowCommentSpotlight {
+            controller.reloadReaderDiscoverNudgeFlow(at: indexPath)
+        }
+
+        ReaderCommentAction().execute(post: post, origin: origin, source: .postCard)
     }
 
     func readerCell(_ cell: ReaderPostCardCell, followActionForProvider provider: ReaderPostContentProvider) {
@@ -38,10 +58,17 @@ class ReaderPostCellActions: NSObject, ReaderPostCellDelegate {
     }
 
     func readerCell(_ cell: ReaderPostCardCell, saveActionForProvider provider: ReaderPostContentProvider) {
-        guard let post = provider as? ReaderPost else {
-            return
+        if let origin = origin as? ReaderStreamViewController, origin.contentType == .saved {
+            if let post = provider as? ReaderPost {
+                removedPosts.add(post)
+            }
+            savedPostsDelegate?.willRemove(cell)
+        } else {
+            guard let post = provider as? ReaderPost else {
+                return
+            }
+            toggleSavedForLater(for: post)
         }
-        toggleSavedForLater(for: post)
     }
 
     func readerCell(_ cell: ReaderPostCardCell, shareActionForProvider provider: ReaderPostContentProvider, fromView sender: UIView) {
@@ -51,26 +78,35 @@ class ReaderPostCellActions: NSObject, ReaderPostCellDelegate {
         sharePost(post, fromView: sender)
     }
 
-    func readerCell(_ cell: ReaderPostCardCell, visitActionForProvider provider: ReaderPostContentProvider) {
-        guard let post = provider as? ReaderPost else {
-            return
-        }
-        visitSiteForPost(post)
-    }
-
     func readerCell(_ cell: ReaderPostCardCell, likeActionForProvider provider: ReaderPostContentProvider) {
         guard let post = provider as? ReaderPost else {
             return
         }
-        toggleLikeForPost(post)
+
+        ReaderLikeAction().execute(with: post, context: context, completion: {
+            cell.refreshLikeButton()
+        })
     }
 
     func readerCell(_ cell: ReaderPostCardCell, menuActionForProvider provider: ReaderPostContentProvider, fromView sender: UIView) {
-        guard let post = provider as? ReaderPost, let origin = origin else {
+        guard let post = provider as? ReaderPost,
+              let origin = origin,
+              let followCommentsService = FollowCommentsService(post: post) else {
             return
         }
 
-        ReaderMenuAction(logged: isLoggedIn).execute(post: post, context: context, readerTopic: topic, anchor: sender, vc: origin)
+        self.followCommentsService = followCommentsService
+
+        ReaderMenuAction(logged: isLoggedIn).execute(
+            post: post,
+            context: context,
+            readerTopic: topic,
+            anchor: sender,
+            vc: origin,
+            source: ReaderPostMenuSource.card,
+            followCommentsService: followCommentsService
+        )
+        WPAnalytics.trackReader(.postCardMoreTapped)
     }
 
     func readerCell(_ cell: ReaderPostCardCell, attributionActionForProvider provider: ReaderPostContentProvider) {
@@ -91,33 +127,35 @@ class ReaderPostCellActions: NSObject, ReaderPostCellDelegate {
         return imageRequestAuthToken
     }
 
-    fileprivate func toggleFollowingForPost(_ post: ReaderPost) {
-        let siteTitle = post.blogNameForDisplay()
-        let siteID = post.siteID
-        let toFollow = !post.isFollowing
-
-        ReaderFollowAction().execute(with: post, context: context) { [weak self] in
-            if toFollow {
-                self?.origin?.dispatchSubscribingNotificationNotice(with: siteTitle, siteID: siteID)
-            }
-        }
+    private func toggleFollowingForPost(_ post: ReaderPost) {
+        ReaderFollowAction().execute(with: post,
+                                     context: context,
+                                     completion: { follow in
+            ReaderHelpers.dispatchToggleFollowSiteMessage(post: post, follow: follow, success: true)
+        }, failure: { follow, _ in
+            ReaderHelpers.dispatchToggleFollowSiteMessage(post: post, follow: follow, success: false)
+        })
     }
 
     func toggleSavedForLater(for post: ReaderPost) {
         let actionOrigin: ReaderSaveForLaterOrigin
-        if origin is ReaderSavedPostsViewController {
+
+        if let origin = origin as? ReaderStreamViewController, origin.contentType == .saved {
             actionOrigin = .savedStream
         } else {
             actionOrigin = .otherStream
         }
 
         if !post.isSavedForLater {
-            if let origin = origin as? UIViewController & UIViewControllerTransitioningDelegate {
+            if let origin = origin as? ReaderStreamViewController, origin.contentType != .saved {
                 FancyAlertViewController.presentReaderSavedPostsAlertControllerIfNecessary(from: origin)
             }
         }
 
-        ReaderSaveForLaterAction(visibleConfirmation: visibleConfirmation).execute(with: post, context: context, origin: actionOrigin)
+        let saveAction = ReaderSaveForLaterAction(visibleConfirmation: visibleConfirmation)
+
+        saveAction.execute(with: post, context: context, origin: actionOrigin, viewController: origin)
+        saveForLaterAction = saveAction
     }
 
     fileprivate func visitSiteForPost(_ post: ReaderPost) {
@@ -132,11 +170,6 @@ class ReaderPostCellActions: NSObject, ReaderPostCellDelegate {
             return
         }
         ReaderShowAttributionAction().execute(with: post, context: context, origin: origin)
-    }
-
-
-    fileprivate func toggleLikeForPost(_ post: ReaderPost) {
-        ReaderLikeAction().execute(with: post, context: context)
     }
 
     fileprivate func sharePost(_ post: ReaderPost, fromView anchorView: UIView) {
@@ -169,5 +202,23 @@ enum ReaderActionsVisibility: Equatable {
         case .visible(let enabled):
             return enabled
         }
+    }
+}
+
+
+// MARK: - Saved Posts
+extension ReaderPostCellActions {
+
+    func postIsRemoved(_ post: ReaderPost) -> Bool {
+        return removedPosts.contains(post)
+    }
+
+    func restoreUnsavedPost(_ post: ReaderPost) {
+        removedPosts.remove(post)
+    }
+
+    func clearRemovedPosts() {
+        removedPosts.all().forEach({ toggleSavedForLater(for: $0) })
+        removedPosts = ReaderSaveForLaterRemovedPosts()
     }
 }

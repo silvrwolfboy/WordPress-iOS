@@ -21,9 +21,7 @@ static NSString *const ActivityLogCellIdentifier = @"ActivityLogCell";
 {
     self = [super initWithStyle:UITableViewStyleGrouped];
     if (self) {
-        // TODO - Replace this call with an injected value, depending on design conventions already in place
-        WordPressAppDelegate *delegate = (WordPressAppDelegate *)[[UIApplication sharedApplication] delegate];
-        _fileLogger = delegate.logger.fileLogger;
+        _fileLogger = [WPLogger shared].fileLogger;
 
         self.title = NSLocalizedString(@"Activity Logs", @"");
 
@@ -141,16 +139,35 @@ static NSString *const ActivityLogCellIdentifier = @"ActivityLogCell";
                                                                                                        forDateString:[self.dateFormatter stringFromDate:logFileInfo.creationDate]];
         [self.navigationController pushViewController:detailViewController animated:YES];
     } else {
-        for (DDLogFileInfo *logFileInfo in self.logFiles) {
-            if (logFileInfo.isArchived) {
-                [[NSFileManager defaultManager] removeItemAtPath:logFileInfo.filePath error:nil];
-            }
-        }
+        //Delete old activity logs
+        NSString *titleText = NSLocalizedString(@"Delete", comment: @"Title of the trash confirmation alert.");
+        NSString *messageText = NSLocalizedString(@"Clear all old activity logs?", comment: @"Message of the trash confirmation alert.");
+        NSString *trashButtonTitle = NSLocalizedString(@"Yes", comment: @"Label for a button that clears all old activity logs");
+        NSString *cancelButtonTitle = NSLocalizedString(@"No", comment: @"Label for a cancel button");
+        
+        UIAlertController *alert = [UIAlertController
+                                    alertControllerWithTitle: titleText
+                                    message: messageText
+                                    preferredStyle:UIAlertControllerStyleAlert];
 
-        DDLogWarn(@"All archived log files erased.");
+        //Add Buttons
+        UIAlertAction *yesButton = [UIAlertAction
+                                    actionWithTitle:trashButtonTitle
+                                    style:UIAlertActionStyleDestructive
+                                    handler:^(UIAlertAction * __unused action) {
+                                      [WPLogger.shared deleteArchivedLogs];
+                                      [self loadLogFiles];
+                                      [self.tableView reloadData];
+                                    }];
 
-        [self loadLogFiles];
-        [self.tableView reloadData];
+        UIAlertAction *noButton = [UIAlertAction
+            actionWithTitle:cancelButtonTitle
+            style:UIAlertActionStyleDefault
+            handler:^(UIAlertAction * __unused action) {
+            }];
+        [alert addAction:noButton];
+        [alert addAction:yesButton];
+        [self presentViewController:alert animated:YES completion:nil];
     }
 }
 

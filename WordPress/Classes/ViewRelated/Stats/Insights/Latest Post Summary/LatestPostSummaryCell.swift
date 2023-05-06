@@ -1,7 +1,11 @@
 import UIKit
 import Gridicons
 
-class LatestPostSummaryCell: UITableViewCell, NibLoadable, Accessible {
+protocol LatestPostSummaryConfigurable {
+    func configure(withInsightData lastPostInsight: StatsLastPostInsight?, chartData: StatsPostDetails?, andDelegate delegate: SiteStatsInsightsDelegate?)
+}
+
+class LatestPostSummaryCell: StatsBaseCell, LatestPostSummaryConfigurable, NibLoadable, Accessible {
 
     // MARK: - Properties
 
@@ -42,6 +46,7 @@ class LatestPostSummaryCell: UITableViewCell, NibLoadable, Accessible {
         super.awakeFromNib()
         applyStyles()
         prepareForVoiceOver()
+        setupStackViewsMargins()
     }
 
     override func prepareForReuse() {
@@ -52,6 +57,7 @@ class LatestPostSummaryCell: UITableViewCell, NibLoadable, Accessible {
     func configure(withInsightData lastPostInsight: StatsLastPostInsight?, chartData: StatsPostDetails?, andDelegate delegate: SiteStatsInsightsDelegate?) {
 
         siteStatsInsightsDelegate = delegate
+        statSection = .insightsLatestPostSummary
 
         // If there is no summary data, there is no post. Show Create Post option.
         guard let lastPostInsight = lastPostInsight else {
@@ -99,6 +105,17 @@ private extension LatestPostSummaryCell {
         actionLabel.textColor = Style.actionTextColor
     }
 
+    func setupStackViewsMargins() {
+        actionStackView.isLayoutMarginsRelativeArrangement = true
+        actionStackView.directionalLayoutMargins = StackViewsMargins.horizontalPaddingMargins
+
+        viewsStackView.isLayoutMarginsRelativeArrangement = true
+        viewsStackView.directionalLayoutMargins = StackViewsMargins.horizontalPaddingMargins
+
+        chartStackView.isLayoutMarginsRelativeArrangement = true
+        chartStackView.directionalLayoutMargins = StackViewsMargins.horizontalPaddingMargins
+    }
+
     func configureViewForAction() {
         guard let actionType = actionType else {
             return
@@ -133,7 +150,7 @@ private extension LatestPostSummaryCell {
     }
 
     func setActionImageFor(action: ActionType) {
-        let iconType: GridiconType = action == .sharePost ? .shareIOS : .create
+        let iconType: GridiconType = action == .sharePost ? .shareiOS : .create
         actionImageView.image = Style.imageForGridiconType(iconType, withTint: .blue)
     }
 
@@ -149,7 +166,7 @@ private extension LatestPostSummaryCell {
 
         let postAge = lastPostInsight?.publishedDate.relativeStringInPast() ?? ""
 
-        if let title = lastPostInsight?.title, !title.isEmpty {
+        if let title = lastPostInsight?.title.strippingHTML(), !title.isEmpty {
             postTitle = title
         }
 
@@ -189,6 +206,10 @@ private extension LatestPostSummaryCell {
     struct ContentStackViewTopConstraint {
         static let dataShown = CGFloat(24)
         static let dataHidden = CGFloat(16)
+    }
+
+    struct StackViewsMargins {
+        static let horizontalPaddingMargins = NSDirectionalEdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
     }
 
     struct CellStrings {
@@ -262,12 +283,5 @@ private extension LatestPostSummaryCell {
 
         resetChartContainerView()
         chartStackView.addArrangedSubview(chartView)
-
-        NSLayoutConstraint.activate([
-            chartView.leadingAnchor.constraint(equalTo: chartStackView.leadingAnchor),
-            chartView.trailingAnchor.constraint(equalTo: chartStackView.trailingAnchor),
-            chartView.topAnchor.constraint(equalTo: chartStackView.topAnchor),
-            chartView.bottomAnchor.constraint(equalTo: chartStackView.bottomAnchor)
-        ])
     }
 }

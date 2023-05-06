@@ -5,7 +5,6 @@
 #import "Menu.h"
 #import "MenuLocation.h"
 #import "MenuItem.h"
-#import "TestContextManager.h"
 #import "WordPressTest-Swift.h"
 
 @interface WPAccount ()
@@ -13,7 +12,7 @@
 @end
 
 @interface MenusServiceTests : XCTestCase
-@property (nonatomic, strong) TestContextManager *manager;
+@property (nonatomic, strong) id<CoreDataStack> manager;
 @end
 
 @implementation MenusServiceTests
@@ -21,7 +20,7 @@
 - (void)setUp
 {
     [super setUp];
-    self.manager = [TestContextManager new];
+    self.manager = [self coreDataStackForTesting];
 }
 
 - (void)tearDown
@@ -81,7 +80,7 @@
     XCTAssertNoThrow(service = [[MenusService alloc] initWithManagedObjectContext:context]);
     XCTAssertNoThrow([service syncMenusForBlog:blog
                                        success:^(){}
-                                       failure:^(NSError *error) {}]);
+                                       failure:^(NSError * __unused error) {}]);
 }
 
 - (void)testThatCreateMenuWithNameWorks
@@ -114,7 +113,7 @@
     XCTAssertNoThrow([service createOrUpdateMenu:menu
                                             forBlog:blog
                                          success:^(void) {}
-                                         failure:^(NSError *error) {}]);
+                                         failure:^(NSError * __unused error) {}]);
 }
 
 - (void)testThatUpdateMenuWorks
@@ -163,7 +162,7 @@
     XCTAssertNoThrow([service createOrUpdateMenu:menu
                                  forBlog:blog
                                  success:^(){}
-                                 failure:^(NSError *error) {}]);
+                                 failure:^(NSError * __unused error) {}]);
 }
 
 - (void)testThatDeleteMenuWithIdWorks
@@ -190,7 +189,7 @@
     XCTAssertNoThrow([service deleteMenu:menu
                                  forBlog:blog
                                  success:^(){}
-                                 failure:^(NSError *error) {}]);
+                                 failure:^(NSError * __unused error) {}]);
 }
 
 - (void)testThatDeleteMenuWithoutIdWorks
@@ -217,7 +216,7 @@
     XCTAssertNoThrow([service deleteMenu:menu
                                  forBlog:blog
                                  success:^(){}
-                                 failure:^(NSError *error) {}]);
+                                 failure:^(NSError * __unused error) {}]);
 }
 
 @end

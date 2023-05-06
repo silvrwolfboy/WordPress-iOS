@@ -1,5 +1,6 @@
 import Foundation
 import WordPressFlux
+import WidgetKit
 
 enum PeriodType: CaseIterable {
     case summary
@@ -18,7 +19,6 @@ enum PeriodAction: Action {
 
     // Period overview
     case receivedSummary(_ summary: StatsSummaryTimeIntervalData?, _ error: Error?)
-    case receivedLikesSummary(_ likes: StatsLikesSummaryTimeIntervalData?, _ error: Error?)
     case receivedPostsAndPages(_ postsAndPages: StatsTopPostsTimeIntervalData?, _ error: Error?)
     case receivedPublished(_ published: StatsPublishedPostsTimeIntervalData?, _ error: Error?)
     case receivedReferrers(_ referrers: StatsTopReferrersTimeIntervalData?, _ error: Error?)
@@ -130,11 +130,12 @@ struct PeriodStoreState {
     var summary: StatsSummaryTimeIntervalData? {
         didSet {
             storeThisWeekWidgetData()
+            StoreContainer.shared.statsWidgets.updateThisWeekHomeWidget(summary: summary)
+            storeTodayHomeWidgetData()
         }
     }
 
     var summaryStatus: StoreFetchingStatus = .idle
-    var summaryLikesStatus: StoreFetchingStatus = .idle
 
     var topPostsAndPages: StatsTopPostsTimeIntervalData?
     var topPostsAndPagesStatus: StoreFetchingStatus = .idle
@@ -169,14 +170,21 @@ struct PeriodStoreState {
     var postStatsFetchingStatuses = [Int: StoreFetchingStatus]()
 }
 
+protocol StatsPeriodStoreDelegate: AnyObject {
+    func didChangeSpamState(for referrerDomain: String, isSpam: Bool)
+    func changingSpamStateForReferrerDomainFailed(oldValue: Bool)
+}
+
 class StatsPeriodStore: QueryStore<PeriodStoreState, PeriodQuery> {
     private typealias PeriodOperation = StatsPeriodAsyncOperation
     private typealias PublishedPostOperation = StatsPublishedPostsAsyncOperation
     private typealias PostDetailOperation = StatsPostDetailAsyncOperation
 
-    private var statsServiceRemote: StatsServiceRemoteV2?
+    var statsServiceRemote: StatsServiceRemoteV2?
     private var operationQueue = OperationQueue()
     private let scheduler = Scheduler(seconds: 0.3)
+
+    weak var delegate: StatsPeriodStoreDelegate?
 
     init() {
         super.init(initialState: PeriodStoreState())
@@ -191,8 +199,6 @@ class StatsPeriodStore: QueryStore<PeriodStoreState, PeriodQuery> {
         switch periodAction {
         case .receivedSummary(let summary, let error):
             receivedSummary(summary, error)
-        case .receivedLikesSummary(let likes, let error):
-            receivedLikesSummary(likes, error)
         case .receivedPostsAndPages(let postsAndPages, let error):
             receivedPostsAndPages(postsAndPages, error)
         case .refreshPostsAndPages(let date, let period):
@@ -246,7 +252,7 @@ class StatsPeriodStore: QueryStore<PeriodStoreState, PeriodQuery> {
     func persistToCoreData() {
         guard
             let siteID = SiteStatsInformation.sharedInstance.siteID,
-            let blog = BlogService.withMainContext().blog(byBlogId: siteID) else {
+            let blog = Blog.lookup(withID: siteID, in: ContextManager.shared.mainContext) else {
                 return
         }
 
@@ -374,17 +380,12 @@ private extension StatsPeriodStore {
             return
         }
 
-        let likesOperation = PeriodOperation(service: service, for: period, date: date, limit: 14) { [weak self] (likes: StatsLikesSummaryTimeIntervalData?, error: Error?) in
-            if error != nil {
-                DDLogError("Stats Period: Error fetching likes summary: \(String(describing: error?.localizedDescription))")
-            }
+        let group = DispatchGroup()
 
-            DDLogInfo("Stats Period: Finished fetching likes summary.")
-            DispatchQueue.main.async {
-                self?.receivedLikesSummary(likes, error)
-            }
+        if FeatureFlag.statsNewAppearance.enabled {
+            group.enter()
+            DDLogInfo("Stats Period: Enter group fetching posts.")
         }
-
         let topPostsOperation = PeriodOperation(service: service, for: period, date: date) { [weak self] (posts: StatsTopPostsTimeIntervalData?, error: Error?) in
             if error != nil {
                 DDLogError("Stats Period: Error fetching posts: \(String(describing: error?.localizedDescription))")
@@ -394,9 +395,17 @@ private extension StatsPeriodStore {
 
             DispatchQueue.main.async {
                 self?.receivedPostsAndPages(posts, error)
+                if FeatureFlag.statsNewAppearance.enabled {
+                    DDLogInfo("Stats Period: Leave group fetching posts.")
+                    group.leave()
+                }
             }
         }
 
+        if FeatureFlag.statsNewAppearance.enabled {
+            group.enter()
+            DDLogInfo("Stats Period: Enter group fetching referrers.")
+        }
         let topReferrers = PeriodOperation(service: service, for: period, date: date) { [weak self] (referrers: StatsTopReferrersTimeIntervalData?, error: Error?) in
             if error != nil {
                 DDLogError("Stats Period: Error fetching referrers: \(String(describing: error?.localizedDescription))")
@@ -406,9 +415,17 @@ private extension StatsPeriodStore {
 
             DispatchQueue.main.async {
                 self?.receivedReferrers(referrers, error)
+                if FeatureFlag.statsNewAppearance.enabled {
+                    DDLogInfo("Stats Period: Leave group fetching referrers.")
+                    group.leave()
+                }
             }
         }
 
+        if FeatureFlag.statsNewAppearance.enabled {
+            group.enter()
+            DDLogInfo("Stats Period: Enter group fetching published.")
+        }
         let topPublished = PublishedPostOperation(service: service, for: period, date: date) { [weak self] (published: StatsPublishedPostsTimeIntervalData?, error: Error?) in
             if error != nil {
                 DDLogError("Stats Period: Error fetching published: \(String(describing: error?.localizedDescription))")
@@ -418,9 +435,17 @@ private extension StatsPeriodStore {
 
             DispatchQueue.main.async {
                 self?.receivedPublished(published, error)
+                if FeatureFlag.statsNewAppearance.enabled {
+                    DDLogInfo("Stats Period: Leave group fetching published.")
+                    group.leave()
+                }
             }
         }
 
+        if FeatureFlag.statsNewAppearance.enabled {
+            group.enter()
+            DDLogInfo("Stats Period: Enter group fetching clicks.")
+        }
         let topClicks = PeriodOperation(service: service, for: period, date: date) { [weak self] (clicks: StatsTopClicksTimeIntervalData?, error: Error?) in
             if error != nil {
                 DDLogError("Stats Period: Error fetching clicks: \(String(describing: error?.localizedDescription))")
@@ -430,9 +455,17 @@ private extension StatsPeriodStore {
 
             DispatchQueue.main.async {
                 self?.receivedClicks(clicks, error)
+                if FeatureFlag.statsNewAppearance.enabled {
+                    DDLogInfo("Stats Period: Leave group fetching clicks.")
+                    group.leave()
+                }
             }
         }
 
+        if FeatureFlag.statsNewAppearance.enabled {
+            group.enter()
+            DDLogInfo("Stats Period: Enter group fetching authors.")
+        }
         let topAuthors = PeriodOperation(service: service, for: period, date: date) { [weak self] (authors: StatsTopAuthorsTimeIntervalData?, error: Error?) in
             if error != nil {
                 DDLogError("Stats Period: Error fetching authors: \(String(describing: error?.localizedDescription))")
@@ -442,9 +475,17 @@ private extension StatsPeriodStore {
 
             DispatchQueue.main.async {
                 self?.receivedAuthors(authors, error)
+                if FeatureFlag.statsNewAppearance.enabled {
+                    DDLogInfo("Stats Period: Leave group fetching authors.")
+                    group.leave()
+                }
             }
         }
 
+        if FeatureFlag.statsNewAppearance.enabled {
+            group.enter()
+            DDLogInfo("Stats Period: Enter group fetching search terms.")
+        }
         let topSearchTerms = PeriodOperation(service: service, for: period, date: date) { [weak self] (searchTerms: StatsSearchTermTimeIntervalData?, error: Error?) in
             if error != nil {
                 DDLogError("Stats Period: Error fetching search terms: \(String(describing: error?.localizedDescription))")
@@ -454,9 +495,17 @@ private extension StatsPeriodStore {
 
             DispatchQueue.main.async {
                 self?.receivedSearchTerms(searchTerms, error)
+                if FeatureFlag.statsNewAppearance.enabled {
+                    DDLogInfo("Stats Period: Leave group fetching search terms.")
+                    group.leave()
+                }
             }
         }
 
+        if FeatureFlag.statsNewAppearance.enabled {
+            group.enter()
+            DDLogInfo("Stats Period: Enter group fetching countries.")
+        }
         let topCountries = PeriodOperation(service: service, for: period, date: date, limit: 0) { [weak self] (countries: StatsTopCountryTimeIntervalData?, error: Error?) in
             if error != nil {
                 DDLogError("Stats Period: Error fetching countries: \(String(describing: error?.localizedDescription))")
@@ -466,9 +515,17 @@ private extension StatsPeriodStore {
 
             DispatchQueue.main.async {
                 self?.receivedCountries(countries, error)
+                if FeatureFlag.statsNewAppearance.enabled {
+                    DDLogInfo("Stats Period: Leave group fetching countries.")
+                    group.leave()
+                }
             }
         }
 
+        if FeatureFlag.statsNewAppearance.enabled {
+            group.enter()
+            DDLogInfo("Stats Period: Enter group fetching videos.")
+        }
         let topVideos = PeriodOperation(service: service, for: period, date: date) { [weak self] (videos: StatsTopVideosTimeIntervalData?, error: Error?) in
             if error != nil {
                 DDLogError("Stats Period: Error fetching videos: \(String(describing: error?.localizedDescription))")
@@ -478,11 +535,19 @@ private extension StatsPeriodStore {
 
             DispatchQueue.main.async {
                 self?.receivedVideos(videos, error)
+                if FeatureFlag.statsNewAppearance.enabled {
+                    DDLogInfo("Stats Period: Leave group fetching videos.")
+                    group.leave()
+                }
             }
         }
 
         // 'limit' in this context is used for the 'num' parameter for the 'file-downloads' endpoint.
         // 'num' relates to the "number of periods to include in the query".
+        if FeatureFlag.statsNewAppearance.enabled {
+            group.enter()
+            DDLogInfo("Stats Period: Enter group fetching file downloads.")
+        }
         let topFileDownloads = PeriodOperation(service: service, for: period, date: date, limit: 1) { [weak self] (downloads: StatsFileDownloadsTimeIntervalData?, error: Error?) in
             if error != nil {
                 DDLogError("Stats Period: Error file downloads: \(String(describing: error?.localizedDescription))")
@@ -492,11 +557,14 @@ private extension StatsPeriodStore {
 
             DispatchQueue.main.async {
                 self?.receivedFileDownloads(downloads, error)
+                if FeatureFlag.statsNewAppearance.enabled {
+                    DDLogInfo("Stats Period: Leave group fetching file downloads.")
+                    group.leave()
+                }
             }
         }
 
-        operationQueue.addOperations([likesOperation,
-                                      topPostsOperation,
+        operationQueue.addOperations([topPostsOperation,
                                       topReferrers,
                                       topPublished,
                                       topClicks,
@@ -506,21 +574,11 @@ private extension StatsPeriodStore {
                                       topVideos,
                                       topFileDownloads],
                                      waitUntilFinished: false)
-    }
 
-    func fetchSummaryLikesData(date: Date, period: StatsPeriodUnit) {
-        guard let statsRemote = statsRemote() else {
-            return
-        }
-
-        statsRemote.getData(for: period, endingOn: date, limit: 14) { (likes: StatsLikesSummaryTimeIntervalData?, error: Error?) in
-            if error != nil {
-                DDLogInfo("Stats Period: Error fetching likes summary: \(String(describing: error?.localizedDescription))")
-            }
-
-            DDLogInfo("Stats Period: Finished fetching likes summary.")
-            DispatchQueue.main.async {
-                self.actionDispatcher.dispatch(PeriodAction.receivedLikesSummary(likes, error))
+        if FeatureFlag.statsNewAppearance.enabled {
+            group.notify(queue: .main) { [weak self] in
+                DDLogInfo("Stats Period: Finished fetchAsyncData.")
+                self?.persistToCoreData()
             }
         }
     }
@@ -528,7 +586,7 @@ private extension StatsPeriodStore {
     func loadFromCache(date: Date, period: StatsPeriodUnit) {
         guard
             let siteID = SiteStatsInformation.sharedInstance.siteID,
-            let blog = BlogService.withMainContext().blog(byBlogId: siteID) else {
+            let blog = Blog.lookup(withID: siteID, in: ContextManager.shared.mainContext) else {
                 return
         }
 
@@ -905,39 +963,6 @@ private extension StatsPeriodStore {
         }
     }
 
-    func receivedLikesSummary(_ likesSummary: StatsLikesSummaryTimeIntervalData?, _ error: Error?) {
-        // This is a workaround for how our API works — the requests for summary for long periods of times
-        // can take extreme amounts of time to finish (and semi-frequenty fail). In order to not block the UI
-        // here, we split out the views/visitors/comments and likes requests.
-        // This method splices the results of the two back together so we can persist it to Core Data.
-        guard let summary = likesSummary,
-            let currentSummary = state.summary,
-            summary.summaryData.count == currentSummary.summaryData.count else {
-                transaction { state in
-                    state.summaryLikesStatus = error != nil ? .error : .success
-                }
-                return
-        }
-
-        let newSummaryData = currentSummary.summaryData.enumerated().map { index, obj in
-            return StatsSummaryData(period: obj.period,
-                                    periodStartDate: obj.periodStartDate,
-                                    viewsCount: obj.viewsCount,
-                                    visitorsCount: obj.visitorsCount,
-                                    likesCount: summary.summaryData[index].likesCount,
-                                    commentsCount: obj.commentsCount)
-        }
-
-        let newSummary = StatsSummaryTimeIntervalData(period: currentSummary.period,
-                                                      periodEndDate: currentSummary.periodEndDate,
-                                                      summaryData: newSummaryData)
-
-        transaction { state in
-            state.summary = newSummary
-            state.summaryLikesStatus = error != nil ? .error : .success
-        }
-    }
-
     func receivedPostsAndPages(_ postsAndPages: StatsTopPostsTimeIntervalData?, _ error: Error?) {
         transaction { state in
             state.topPostsAndPagesStatus = error != nil ? .error : .success
@@ -1038,11 +1063,15 @@ private extension StatsPeriodStore {
     // MARK: - Helpers
 
     func statsRemote() -> StatsServiceRemoteV2? {
-
-        if statsServiceRemote == nil {
+        // initialize the service if it's nil
+        guard let statsService = statsServiceRemote else {
+            initializeStatsRemote()
+            return statsServiceRemote
+        }
+        // also re-initialize the service if the site has changed
+        if let siteID = SiteStatsInformation.sharedInstance.siteID?.intValue, siteID != statsService.siteID {
             initializeStatsRemote()
         }
-
         return statsServiceRemote
     }
 
@@ -1062,12 +1091,8 @@ private extension StatsPeriodStore {
     func cancelQueries() {
         operationQueue.cancelAllOperations()
 
-        statsServiceRemote?.wordPressComRestApi.invalidateAndCancelTasks()
+        statsServiceRemote?.wordPressComRestApi.cancelTasks()
         setAllFetchingStatus(.idle)
-
-        // `invalidateAndCancelTasks` invalidates the SessionManager,
-        // so we need to recreate it to run queries.
-        initializeStatsRemote()
     }
 
     func shouldFetchOverview() -> Bool {
@@ -1084,17 +1109,18 @@ private extension StatsPeriodStore {
     }
 
     func setAllFetchingStatus(_ status: StoreFetchingStatus) {
-        state.summaryStatus = status
-        state.summaryLikesStatus = status
-        state.topPostsAndPagesStatus = status
-        state.topReferrersStatus = status
-        state.topPublishedStatus = status
-        state.topClicksStatus = status
-        state.topAuthorsStatus = status
-        state.topSearchTermsStatus = status
-        state.topCountriesStatus = status
-        state.topVideosStatus = status
-        state.topFileDownloadsStatus = status
+        transaction { state in
+            state.summaryStatus = status
+            state.topPostsAndPagesStatus = status
+            state.topReferrersStatus = status
+            state.topPublishedStatus = status
+            state.topClicksStatus = status
+            state.topAuthorsStatus = status
+            state.topSearchTermsStatus = status
+            state.topCountriesStatus = status
+            state.topVideosStatus = status
+            state.topFileDownloadsStatus = status
+        }
     }
 
     func shouldFetchPostsAndPages() -> Bool {
@@ -1242,10 +1268,6 @@ extension StatsPeriodStore {
         return state.topFileDownloadsStatus
     }
 
-    var isFetchingSummaryLikes: Bool {
-        return state.summaryLikesStatus == .loading
-    }
-
     var isFetchingPostsAndPages: Bool {
         return topPostsAndPagesStatus == .loading
     }
@@ -1340,11 +1362,49 @@ extension StatsPeriodStore {
         }
         return status
     }
+
+    func toggleSpamState(for referrerDomain: String, currentValue: Bool) {
+        for (index, referrer) in (state.topReferrers?.referrers ?? []).enumerated() {
+            guard (referrer.children.isEmpty && referrer.url?.host == referrerDomain) ||
+                    referrer.children.first?.url?.host == referrerDomain else {
+                continue
+            }
+
+            toggleSpamState(for: referrerDomain,
+                            currentValue: currentValue,
+                            referrerIndex: index,
+                            hasChildren: !referrer.children.isEmpty) { [weak self] in
+                switch $0 {
+                case .success:
+                    self?.delegate?.didChangeSpamState(for: referrerDomain, isSpam: !currentValue)
+                case .failure:
+                    self?.delegate?.changingSpamStateForReferrerDomainFailed(oldValue: currentValue)
+                }
+            }
+            break
+        }
+    }
 }
 
 // MARK: - Widget Data
 
 private extension PeriodStoreState {
+
+    // Store data for the iOS 14 Today widget. We don't need to check if the site
+    // matches here, as `storeHomeWidgetData` does that for us.
+    func storeTodayHomeWidgetData() {
+        guard summary?.period == .day,
+              summary?.periodEndDate == StatsDataHelper.currentDateForSite().normalizedDate(),
+              let todayData = summary?.summaryData.last else {
+            return
+        }
+
+        let todayWidgetStats = TodayWidgetStats(views: todayData.viewsCount,
+                                                visitors: todayData.visitorsCount,
+                                                likes: todayData.likesCount,
+                                                comments: todayData.commentsCount)
+        StoreContainer.shared.statsWidgets.storeHomeWidgetData(widgetType: HomeWidgetTodayData.self, stats: todayWidgetStats)
+    }
 
     func storeThisWeekWidgetData() {
         // Only store data if:
@@ -1367,11 +1427,41 @@ private extension PeriodStoreState {
 
     func widgetUsingCurrentSite() -> Bool {
         guard let sharedDefaults = UserDefaults(suiteName: WPAppGroupName),
-            let widgetSiteID = sharedDefaults.object(forKey: WPStatsTodayWidgetUserDefaultsSiteIdKey) as? NSNumber,
+            let widgetSiteID = sharedDefaults.object(forKey: AppConfiguration.Widget.StatsToday.userDefaultsSiteIdKey) as? NSNumber,
             widgetSiteID == SiteStatsInformation.sharedInstance.siteID  else {
                 return false
         }
         return true
     }
+}
 
+// MARK: - Toggle referrer spam state helper
+
+private extension StatsPeriodStore {
+    func toggleSpamState(for referrerDomain: String,
+                         currentValue: Bool,
+                         referrerIndex: Int,
+                         hasChildren: Bool,
+                         completion: @escaping (Result<Void, Error>) -> Void) {
+        statsServiceRemote?.toggleSpamState(for: referrerDomain, currentValue: currentValue, success: { [weak self] in
+            guard let self = self else {
+                return
+            }
+            self.state.topReferrers?.referrers[referrerIndex].isSpam.toggle()
+            DDLogInfo("Stats Period: Referrer \(referrerDomain) isSpam set to \(self.state.topReferrers?.referrers[referrerIndex].isSpam ?? false)")
+
+            guard hasChildren else {
+                completion(.success(()))
+                return
+            }
+            for (childIndex, _) in (self.state.topReferrers?.referrers[referrerIndex].children ?? []).enumerated() {
+                self.state.topReferrers?.referrers[referrerIndex].children[childIndex].isSpam.toggle()
+            }
+
+            completion(.success(()))
+        }, failure: { error in
+            DDLogInfo("Stats Period: Couldn't toggle spam state for referrer \(referrerDomain), reason: \(error.localizedDescription)")
+            completion(.failure(error))
+        })
+    }
 }

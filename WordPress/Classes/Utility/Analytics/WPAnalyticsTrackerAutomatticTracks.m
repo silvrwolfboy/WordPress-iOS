@@ -1,5 +1,5 @@
 #import "WPAnalyticsTrackerAutomatticTracks.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "AccountService.h"
 #import "BlogService.h"
 #import "WPAccount.h"
@@ -47,6 +47,8 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
     if (self) {
         _contextManager = [TracksContextManager new];
         _tracksService = [[TracksService alloc] initWithContextManager:_contextManager];
+        _tracksService.eventNamePrefix = AppConstants.eventNamePrefix;
+        _tracksService.platform = AppConstants.explatPlatform;
     }
     return self;
 }
@@ -69,23 +71,32 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
     [mergedProperties addEntriesFromDictionary:eventPair.properties];
     [mergedProperties addEntriesFromDictionary:properties];
 
-    if (eventPair.properties == nil && properties == nil) {
-        DDLogInfo(@"🔵 Tracked: %@", eventPair.eventName);
+    [self trackString:eventPair.eventName withProperties:mergedProperties];
+}
+
+- (void)trackString:(NSString *)event
+{
+    [self trackString:event withProperties:nil];
+}
+
+- (void)trackString:(NSString *)event withProperties:(NSDictionary *)properties {
+    if (properties == nil) {
+        DDLogInfo(@"🔵 Tracked: %@", event);
     } else {
-        NSArray<NSString *> *propertyKeys = [[mergedProperties allKeys] sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+        NSArray<NSString *> *propertyKeys = [[properties allKeys] sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
         NSString *propertiesDescription = [[propertyKeys wp_map:^NSString *(NSString *key) {
-            return [NSString stringWithFormat:@"%@: %@", key, mergedProperties[key]];
+            return [NSString stringWithFormat:@"%@: %@", key, properties[key]];
         }] componentsJoinedByString:@", "];
-        DDLogInfo(@"🔵 Tracked: %@ <%@>", eventPair.eventName, propertiesDescription);
+        DDLogInfo(@"🔵 Tracked: %@ <%@>", event, propertiesDescription);
     }
 
-    [self.tracksService trackEventName:eventPair.eventName withCustomProperties:mergedProperties];
+    [self.tracksService trackEventName:event withCustomProperties:properties];
 }
 
 - (void)beginSession
 {
     if (self.loggedInID.length > 0) {
-        [self.tracksService switchToAuthenticatedUserWithUsername:self.loggedInID userID:nil skipAliasEventCreation:YES];
+        [self.tracksService switchToAuthenticatedUserWithUsername:self.loggedInID userID:nil wpComToken:[WPAccount tokenForUsername:self.loggedInID] skipAliasEventCreation:YES];
     } else {
         [self.tracksService switchToAnonymousUserWithAnonymousID:self.anonymousID];
     }
@@ -110,13 +121,10 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
     __block WPAccount *account;
 
     [context performBlockAndWait:^{
-        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-        account = [accountService defaultWordPressComAccount];
-        BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
+        account = [WPAccount lookupDefaultWordPressComAccountInContext:context];
 
-
-        blogCount = [blogService blogCountForAllAccounts];
-        jetpackBlogsPresent = [blogService hasAnyJetpackBlogs];
+        blogCount = [Blog countInContext:context];
+        jetpackBlogsPresent = [Blog hasAnyJetpackBlogsInContext:context];
         if (account != nil) {
             username = account.username;
             userID = nil;
@@ -144,6 +152,7 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
     }];
 
     NSMutableDictionary *userProperties = [NSMutableDictionary new];
+    userProperties[@"app_scheme"] = WPComScheme;
     userProperties[@"platform"] = @"iOS";
     userProperties[@"dotcom_user"] = @(dotcom_user);
     userProperties[@"jetpack_user"] = @(jetpackBlogsPresent);
@@ -162,14 +171,14 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
             self.loggedInID = username;
             self.anonymousID = nil;
 
-            [self.tracksService switchToAuthenticatedUserWithUsername:username userID:@"" skipAliasEventCreation:NO];
+            [self.tracksService switchToAuthenticatedUserWithUsername:username userID:@"" wpComToken:[WPAccount tokenForUsername:username] skipAliasEventCreation:NO];
         } else if ([self.loggedInID isEqualToString:username]){
             // Username did not change from last refreshMetadata - just make sure Tracks client has it
-            [self.tracksService switchToAuthenticatedUserWithUsername:username userID:@"" skipAliasEventCreation:YES];
+            [self.tracksService switchToAuthenticatedUserWithUsername:username userID:@"" wpComToken:[WPAccount tokenForUsername:username] skipAliasEventCreation:YES];
         } else {
             // Username changed for some reason - switch back to anonymous first
             [self.tracksService switchToAnonymousUserWithAnonymousID:self.anonymousID];
-            [self.tracksService switchToAuthenticatedUserWithUsername:username userID:@"" skipAliasEventCreation:NO];
+            [self.tracksService switchToAuthenticatedUserWithUsername:username userID:@"" wpComToken:[WPAccount tokenForUsername:username] skipAliasEventCreation:NO];
             self.loggedInID = username;
             self.anonymousID = nil;
         }
@@ -185,10 +194,10 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
 - (NSString *)anonymousID
 {
     if (_anonymousID == nil || _anonymousID.length == 0) {
-        NSString *anonymousID = [[NSUserDefaults standardUserDefaults] stringForKey:TracksUserDefaultsAnonymousUserIDKey];
+        NSString *anonymousID = [[UserPersistentStoreFactory userDefaultsInstance] stringForKey:TracksUserDefaultsAnonymousUserIDKey];
         if (anonymousID == nil) {
             anonymousID = [[NSUUID UUID] UUIDString];
-            [[NSUserDefaults standardUserDefaults] setObject:anonymousID forKey:TracksUserDefaultsAnonymousUserIDKey];
+            [[UserPersistentStoreFactory userDefaultsInstance] setObject:anonymousID forKey:TracksUserDefaultsAnonymousUserIDKey];
         }
         
         _anonymousID = anonymousID;
@@ -202,17 +211,17 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
     _anonymousID = anonymousID;
 
     if (anonymousID == nil) {
-        [[NSUserDefaults standardUserDefaults] removeObjectForKey:TracksUserDefaultsAnonymousUserIDKey];
+        [[UserPersistentStoreFactory userDefaultsInstance] removeObjectForKey:TracksUserDefaultsAnonymousUserIDKey];
         return;
     }
 
-    [[NSUserDefaults standardUserDefaults] setObject:anonymousID forKey:TracksUserDefaultsAnonymousUserIDKey];
+    [[UserPersistentStoreFactory userDefaultsInstance] setObject:anonymousID forKey:TracksUserDefaultsAnonymousUserIDKey];
 }
 
 - (NSString *)loggedInID
 {
     if (_loggedInID == nil || _loggedInID.length == 0) {
-        NSString *loggedInID = [[NSUserDefaults standardUserDefaults] stringForKey:TracksUserDefaultsLoggedInUserIDKey];
+        NSString *loggedInID = [[UserPersistentStoreFactory userDefaultsInstance] stringForKey:TracksUserDefaultsLoggedInUserIDKey];
         if (loggedInID != nil) {
             _loggedInID = loggedInID;
         }
@@ -226,11 +235,11 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
     _loggedInID = loggedInID;
 
     if (loggedInID == nil) {
-        [[NSUserDefaults standardUserDefaults] removeObjectForKey:TracksUserDefaultsLoggedInUserIDKey];
+        [[UserPersistentStoreFactory userDefaultsInstance] removeObjectForKey:TracksUserDefaultsLoggedInUserIDKey];
         return;
     }
 
-    [[NSUserDefaults standardUserDefaults] setObject:loggedInID forKey:TracksUserDefaultsLoggedInUserIDKey];
+    [[UserPersistentStoreFactory userDefaultsInstance] setObject:loggedInID forKey:TracksUserDefaultsLoggedInUserIDKey];
 }
 
 + (TracksEventPair *)eventPairForStat:(WPAnalyticsStat)stat
@@ -437,10 +446,6 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
         case WPAnalyticsStatDomainCreditRedemptionTapped:
             eventName = @"domain_credit_redemption_tapped";
             break;
-        case WPAnalyticsStatEditorAddedPhotoViaGiphy:
-            eventName = @"editor_photo_added";
-            eventProperties = @{ @"via" : @"giphy" };
-            break;
         case WPAnalyticsStatEditorAddedPhotoViaLocalLibrary:
             eventName = @"editor_photo_added";
             eventProperties = @{ @"via" : @"local_library" };
@@ -527,9 +532,6 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
             break;
         case WPAnalyticsStatEditorSessionTemplateApply:
             eventName = @"editor_session_template_apply";
-            break;
-        case WPAnalyticsStatEditorSessionTemplatePreview:
-            eventName = @"editor_session_template_preview";
             break;
         case WPAnalyticsStatEditorPublishedPost:
             eventName = @"editor_post_published";
@@ -660,6 +662,30 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
         case WPAnalyticsStatEnhancedSiteCreationSegmentsSelected:
             eventName = @"enhanced_site_creation_segments_selected";
             break;
+        case WPAnalyticsStatEnhancedSiteCreationSiteDesignViewed:
+            eventName = @"enhanced_site_creation_site_design_viewed";
+            break;
+        case WPAnalyticsStatEnhancedSiteCreationSiteDesignSelected:
+            eventName = @"enhanced_site_creation_site_design_selected";
+            break;
+        case WPAnalyticsStatEnhancedSiteCreationSiteDesignSkipped:
+            eventName = @"enhanced_site_creation_site_design_skipped";
+            break;
+        case WPAnalyticsStatEnhancedSiteCreationSiteDesignPreviewViewed:
+            eventName = @"enhanced_site_creation_site_design_preview_viewed";
+            break;
+        case WPAnalyticsStatEnhancedSiteCreationSiteDesignPreviewLoading:
+            eventName = @"enhanced_site_creation_site_design_preview_loading";
+            break;
+        case WPAnalyticsStatEnhancedSiteCreationSiteDesignPreviewLoaded:
+            eventName = @"enhanced_site_creation_site_design_preview_loaded";
+            break;
+        case WPAnalyticsStatEnhancedSiteCreationSiteDesignPreviewModeButtonTapped:
+            eventName = @"enhanced_site_creation_site_design_preview_mode_button_tapped";
+            break;
+        case WPAnalyticsStatEnhancedSiteCreationSiteDesignPreviewModeChanged:
+            eventName = @"enhanced_site_creation_site_design_preview_mode_changed";
+            break;
         case WPAnalyticsStatEnhancedSiteCreationVerticalsViewed:
             eventName = @"enhanced_site_creation_verticals_viewed";
             break;
@@ -698,15 +724,6 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
             break;
         case WPAnalyticsStatEnhancedSiteCreationErrorShown:
             eventName = @"enhanced_site_creation_error_shown";
-            break;
-        case WPAnalyticsStatGiphyAccessed:
-            eventName = @"giphy_accessed";
-            break;
-        case WPAnalyticsStatGiphySearched:
-            eventName = @"giphy_searched";
-            break;
-        case WPAnalyticsStatGiphyUploaded:
-            eventName = @"giphy_uploaded";
             break;
         case WPAnalyticsStatGravatarCropped:
             eventName = @"me_gravatar_cropped";
@@ -767,6 +784,30 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
             break;
         case WPAnalyticsStatInstallJetpackWebviewFailed:
             eventName = @"connect_jetpack_failed";
+            break;
+        case WPAnalyticsStatLandingEditorShown:
+            eventName = @"landing_editor_shown";
+            break;
+        case WPAnalyticsStatLayoutPickerPreviewErrorShown:
+            eventName = @"layout_picker_preview_error_shown";
+            break;
+        case WPAnalyticsStatLayoutPickerPreviewLoaded:
+            eventName = @"layout_picker_preview_loaded";
+            break;
+        case WPAnalyticsStatLayoutPickerPreviewLoading:
+            eventName = @"layout_picker_preview_loading";
+            break;
+        case WPAnalyticsStatLayoutPickerPreviewModeButtonTapped:
+            eventName = @"layout_picker_preview_mode_button_tapped";
+            break;
+        case WPAnalyticsStatLayoutPickerPreviewModeChanged:
+            eventName = @"layout_picker_preview_mode_changed";
+            break;
+        case WPAnalyticsStatLayoutPickerPreviewViewed:
+            eventName = @"layout_picker_preview_viewed";
+            break;
+        case WPAnalyticsStatLayoutPickerThumbnailModeButtonTapped:
+            eventName = @"layout_picker_thumbnail_mode_button_tapped";
             break;
         case WPAnalyticsStatLogSpecialCondition:
             eventName = @"log_special_condition";
@@ -852,12 +893,6 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
         case WPAnalyticsStatLowMemoryWarning:
             eventName = @"application_low_memory_warning";
             break;
-        case WPAnalyticsStatMediaEditorShown:
-            eventName = @"media_editor_shown";
-            break;
-        case WPAnalyticsStatMediaEditorUsed:
-            eventName = @"media_editor_used";
-            break;
         case WPAnalyticsStatMediaLibraryDeletedItems:
             eventName = @"media_library_deleted_items";
             break;
@@ -876,10 +911,6 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
         case WPAnalyticsStatMediaLibraryAddedPhotoViaDeviceLibrary:
             eventName = @"media_library_photo_added";
             eventProperties = @{ @"via" : @"device_library" };
-            break;
-        case WPAnalyticsStatMediaLibraryAddedPhotoViaGiphy:
-            eventName = @"media_library_photo_added";
-            eventProperties = @{ @"via" : @"giphy" };
             break;
         case WPAnalyticsStatMediaLibraryAddedPhotoViaOtherApps:
             eventName = @"media_library_photo_added";
@@ -959,17 +990,8 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
         case WPAnalyticsStatMySitesTabAccessed:
             eventName = @"my_site_tab_accessed";
             break;
-        case WPAnalyticsStatNewsCardViewed:
-            eventName = @"news_card_shown";
-            break;
-        case WPAnalyticsStatNewsCardDismissed:
-            eventName = @"news_card_dismissed";
-            break;
-        case WPAnalyticsStatNewsCardRequestedExtendedInfo:
-            eventName = @"news_card_extended_info_requested";
-            break;
         case WPAnalyticsStatNotificationsCommentApproved:
-            eventName = @"notifications_approved";
+            eventName = @"notifications_comment_approved";
             break;
         case WPAnalyticsStatNotificationsCommentFlaggedAsSpam:
             eventName = @"notifications_flagged_as_spam";
@@ -1183,6 +1205,10 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
         case WPAnalyticsStatPostListEditAction:
             eventName = @"post_list_button_pressed";
             eventProperties = @{ TracksEventPropertyButtonKey : @"edit" };
+            break;
+        case WPAnalyticsStatPostListDuplicateAction:
+            eventName = @"post_list_button_pressed";
+            eventProperties = @{ TracksEventPropertyButtonKey : @"copy" }; // Property aligned with Android
             break;
         case WPAnalyticsStatPostListExcessiveLoadMoreDetected:
             eventName = @"post_list_excessive_load_more_detected";
@@ -1472,6 +1498,7 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
             break;
         case WPAnalyticsStatReaderTagFollowed:
             eventName = @"reader_reader_tag_followed";
+            eventProperties = @{ @"source" : @"unknown" };
             break;
         case WPAnalyticsStatReaderTagLoaded:
             eventName = @"reader_tag_loaded";
@@ -1718,6 +1745,12 @@ NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
             break;
         case WPAnalyticsStatStatsItemTappedInsightsAddStat:
             eventName = @"stats_add_insight_item_tapped";
+            break;
+        case WPAnalyticsStatStatsItemTappedPostStatsMonthsYears:
+            eventName = @"stats_posts_and_pages_months_years_item_tapped";
+            break;
+        case WPAnalyticsStatStatsItemTappedPostStatsRecentWeeks:
+            eventName = @"stats_posts_and_pages_recent_weeks_item_tapped";
             break;
         case WPAnalyticsStatStatsItemTappedInsightsCustomizeDismiss:
             eventName = @"stats_customize_insights_dismiss_item_tapped";

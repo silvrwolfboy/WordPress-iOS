@@ -6,7 +6,7 @@ import WordPressKit
 
 /// GravatarService Unit Tests
 ///
-class GravatarServiceTests: XCTestCase {
+class GravatarServiceTests: CoreDataTestCase {
     class GravatarServiceRemoteMock: GravatarServiceRemote {
         var capturedAccountToken: String = ""
         var capturedAccountEmail: String = ""
@@ -31,18 +31,6 @@ class GravatarServiceTests: XCTestCase {
         }
     }
 
-    private var contextManager: TestContextManager!
-
-    override func setUp() {
-        super.setUp()
-        contextManager = TestContextManager()
-    }
-
-    override func tearDown() {
-        super.tearDown()
-        ContextManager.overrideSharedInstance(nil)
-    }
-
     func testServiceSanitizesEmailAddressCapitals() {
         let account = createTestAccount(username: "some", token: "1234", emailAddress: "emAil@wordpress.com")
 
@@ -64,13 +52,14 @@ class GravatarServiceTests: XCTestCase {
     private func createTestAccount(username: String, token: String, emailAddress: String) -> WPAccount {
         let mainContext = contextManager.mainContext
 
-        let accountService = AccountService(managedObjectContext: mainContext)
-        let defaultAccount = accountService.createOrUpdateAccount(withUsername: username, authToken: token)
+        let accountService = AccountService(coreDataStack: contextManager)
+        let accountId = accountService.createOrUpdateAccount(withUsername: username, authToken: token)
+        let defaultAccount = try! contextManager.mainContext.existingObject(with: accountId) as! WPAccount
         defaultAccount.email = emailAddress
         contextManager.saveContextAndWait(mainContext)
 
         accountService.setDefaultWordPressComAccount(defaultAccount)
-        XCTAssertNotNil(accountService.defaultWordPressComAccount())
+        XCTAssertNotNil(try WPAccount.lookupDefaultWordPressComAccount(in: mainContext))
 
         return defaultAccount
     }

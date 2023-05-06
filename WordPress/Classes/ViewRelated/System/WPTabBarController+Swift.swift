@@ -2,11 +2,7 @@
 // MARK: - Tab Access Tracking
 
 extension WPTabBarController {
-    private static let tabIndexToStatMap: [WPTabType: WPAnalyticsStat] = [
-        .mySites: .mySitesTabAccessed,
-        .reader: .readerAccessed,
-        .me: .meTabAccessed
-    ]
+    private static let tabIndexToStatMap: [WPTab: WPAnalyticsStat] = [.mySites: .mySitesTabAccessed, .reader: .readerAccessed]
 
     private struct AssociatedKeys {
         static var shouldTrackTabAccessOnViewDidAppear = 0
@@ -83,17 +79,31 @@ extension WPTabBarController {
             return false
         }
 
-        guard let tabType = WPTabType(rawValue: UInt(tabIndex)),
+        guard let tabType = WPTab(rawValue: Int(tabIndex)),
             let stat = WPTabBarController.tabIndexToStatMap[tabType] else {
                 return false
         }
 
         WPAppAnalytics.track(stat)
+
         return true
     }
 
     /// Set up the tab bar's colors
     @objc func setupColors() {
         tabBar.isTranslucent = false
+    }
+
+    open override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        guard let selectedViewController else {
+            return super.supportedInterfaceOrientations
+        }
+
+        if let splitViewController = selectedViewController as? WPSplitViewController,
+           let topDetailViewController = splitViewController.topDetailViewController {
+            return topDetailViewController.supportedInterfaceOrientations
+        }
+
+        return selectedViewController.supportedInterfaceOrientations
     }
 }

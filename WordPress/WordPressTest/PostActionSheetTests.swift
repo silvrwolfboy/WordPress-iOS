@@ -5,12 +5,14 @@ import XCTest
 
 private typealias Titles = PostActionSheet.Titles
 
-class PostActionSheetTests: XCTestCase {
+class PostActionSheetTests: CoreDataTestCase {
 
     private var postActionSheet: PostActionSheet!
     private var viewControllerMock: UIViewControllerMock!
     private var interactivePostViewDelegateMock: InteractivePostViewDelegateMock!
     private var view: UIView!
+
+    private let featureFlags = FeatureFlagOverrideStore()
 
     override func setUp() {
         viewControllerMock = UIViewControllerMock()
@@ -25,7 +27,7 @@ class PostActionSheetTests: XCTestCase {
         postActionSheet.show(for: viewModel, from: view)
 
         let options = viewControllerMock.viewControllerPresented?.actions.compactMap { $0.title }
-        XCTAssertEqual(["Cancel", "Stats", "Move to Draft", "Move to Trash"], options)
+        XCTAssertEqual(["Cancel", "Stats", "Share", "Duplicate", "Move to Draft", "Copy Link", "Move to Trash"], options)
     }
 
     func testLocallyPublishedPostShowsCancelAutoUploadOption() {
@@ -34,7 +36,7 @@ class PostActionSheetTests: XCTestCase {
         postActionSheet.show(for: viewModel, from: view, isCompactOrSearching: true)
 
         let options = viewControllerMock.viewControllerPresented?.actions.compactMap { $0.title }
-        XCTAssertEqual([Titles.cancel, Titles.cancelAutoUpload, Titles.draft, Titles.trash], options)
+        XCTAssertEqual([Titles.cancel, Titles.cancelAutoUpload, Titles.duplicate, Titles.draft, Titles.copyLink, Titles.trash], options)
     }
 
     func testDraftedPostOptions() {
@@ -43,7 +45,7 @@ class PostActionSheetTests: XCTestCase {
         postActionSheet.show(for: viewModel, from: view)
 
         let options = viewControllerMock.viewControllerPresented?.actions.compactMap { $0.title }
-        XCTAssertEqual(["Cancel", "Publish Now", "Move to Trash"], options)
+        XCTAssertEqual(["Cancel", "Publish Now", "Duplicate", "Copy Link", "Move to Trash"], options)
     }
 
     func testScheduledPostOptions() {
@@ -52,7 +54,7 @@ class PostActionSheetTests: XCTestCase {
         postActionSheet.show(for: viewModel, from: view)
 
         let options = viewControllerMock.viewControllerPresented?.actions.compactMap { $0.title }
-        XCTAssertEqual(["Cancel", "Move to Draft", "Move to Trash"], options)
+        XCTAssertEqual(["Cancel", "Move to Draft", "Copy Link", "Move to Trash"], options)
     }
 
     func testTrashedPostOptions() {
@@ -70,7 +72,7 @@ class PostActionSheetTests: XCTestCase {
         postActionSheet.show(for: viewModel, from: view, isCompactOrSearching: true)
 
         let options = viewControllerMock.viewControllerPresented?.actions.compactMap { $0.title }
-        XCTAssertEqual(["Cancel", "View", "Stats", "Move to Draft", "Move to Trash"], options)
+        XCTAssertEqual(["Cancel", "View", "Stats", "Share", "Duplicate", "Move to Draft", "Copy Link", "Move to Trash"], options)
     }
 
     func testCallDelegateWhenStatsTapped() {
@@ -80,6 +82,24 @@ class PostActionSheetTests: XCTestCase {
         tap("Stats", in: viewControllerMock.viewControllerPresented)
 
         XCTAssertTrue(interactivePostViewDelegateMock.didCallHandleStats)
+    }
+
+    func testCallDelegateWhenDuplicateTapped() {
+        let viewModel = PostCardStatusViewModel(post: PostBuilder().published().withRemote().build())
+
+        postActionSheet.show(for: viewModel, from: view)
+        tap("Duplicate", in: viewControllerMock.viewControllerPresented)
+
+        XCTAssertTrue(interactivePostViewDelegateMock.didCallHandleDuplicate)
+    }
+
+    func testCallDelegateWhenShareTapped() {
+        let viewModel = PostCardStatusViewModel(post: PostBuilder().published().withRemote().build())
+
+        postActionSheet.show(for: viewModel, from: view)
+        tap("Share", in: viewControllerMock.viewControllerPresented)
+
+        XCTAssertTrue(interactivePostViewDelegateMock.didCallShare)
     }
 
     func testCallDelegateWhenMoveToDraftTapped() {
@@ -100,6 +120,15 @@ class PostActionSheetTests: XCTestCase {
         XCTAssertTrue(interactivePostViewDelegateMock.didCallHandleTrashPost)
     }
 
+    func testCallDelegateWhenCopyLink() {
+        let viewModel = PostCardStatusViewModel(post: PostBuilder().published().build())
+
+        postActionSheet.show(for: viewModel, from: view)
+        tap("Copy Link", in: viewControllerMock.viewControllerPresented)
+
+        XCTAssertTrue(interactivePostViewDelegateMock.didCallCopyLink)
+    }
+
     func testCallDelegateWhenMoveToTrashTapped() {
         let viewModel = PostCardStatusViewModel(post: PostBuilder().published().build())
 
@@ -116,6 +145,25 @@ class PostActionSheetTests: XCTestCase {
         tap("View", in: viewControllerMock.viewControllerPresented)
 
         XCTAssertTrue(interactivePostViewDelegateMock.didCallView)
+    }
+
+    func testCallDelegateWhenBlazeTapped() throws {
+        try featureFlags.override(RemoteFeatureFlag.blaze, withValue: true)
+
+        let blog = BlogBuilder(mainContext)
+            .isBlazeApproved()
+            .build()
+
+        let post = PostBuilder(mainContext, blog: blog)
+            .published()
+            .build()
+
+        let viewModel = PostCardStatusViewModel(post: post, isBlazeFlagEnabled: true)
+
+        postActionSheet.show(for: viewModel, from: view)
+        tap("Promote with Blaze", in: viewControllerMock.viewControllerPresented)
+
+        XCTAssertTrue(interactivePostViewDelegateMock.didCallBlaze)
     }
 
     func testCallsDelegateWhenCancelAutoUploadIsTapped() {
@@ -162,15 +210,23 @@ private class UIViewControllerMock: UIViewController {
 
 class InteractivePostViewDelegateMock: InteractivePostViewDelegate {
     private(set) var didCallHandleStats = false
+    private(set) var didCallHandleDuplicate = false
     private(set) var didCallHandleDraft = false
     private(set) var didCallHandleTrashPost = false
     private(set) var didCallEdit = false
     private(set) var didCallView = false
     private(set) var didCallRetry = false
     private(set) var didCallCancelAutoUpload = false
+    private(set) var didCallShare = false
+    private(set) var didCallCopyLink = false
+    private(set) var didCallBlaze = false
 
     func stats(for post: AbstractPost) {
         didCallHandleStats = true
+    }
+
+    func duplicate(_ post: AbstractPost) {
+        didCallHandleDuplicate = true
     }
 
     func draft(_ post: AbstractPost) {
@@ -203,5 +259,17 @@ class InteractivePostViewDelegateMock: InteractivePostViewDelegate {
 
     func cancelAutoUpload(_ post: AbstractPost) {
         didCallCancelAutoUpload = true
+    }
+
+    func share(_ post: AbstractPost, fromView view: UIView) {
+        didCallShare = true
+    }
+
+    func copyLink(_ post: AbstractPost) {
+        didCallCopyLink = true
+    }
+
+    func blaze(_ post: AbstractPost) {
+        didCallBlaze = true
     }
 }

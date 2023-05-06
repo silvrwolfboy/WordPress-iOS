@@ -17,6 +17,11 @@
     }
 
     @available(swift, obsoleted: 1.0)
+    static func murielEditorPrimary() -> UIColor {
+        return .editorPrimary
+    }
+
+    @available(swift, obsoleted: 1.0)
     static func murielNeutral() -> UIColor {
         return .neutral
     }
@@ -129,5 +134,15 @@
     @available(swift, obsoleted: 1.0)
     static func murielListIcon() -> UIColor {
         return .listIcon
+    }
+
+    @available(swift, obsoleted: 1.0)
+    static func murielAppBarText() -> UIColor {
+        return .appBarText
+    }
+
+    @available(swift, obsoleted: 1.0)
+    static func murielAppBarBackground() -> UIColor {
+        return .appBarBackground
     }
 }

@@ -15,6 +15,8 @@ enum NotificationKind: String {
     case newPost        = "new_post"
     case post           = "post"
     case user           = "user"
+    case login          = "push_auth"
+    case viewMilestone  = "view_milestone"
     case unknown        = "unknown"
 }
 
@@ -24,13 +26,15 @@ extension NotificationKind {
         .comment,
         .commentLike,
         .like,
-        .matcher
+        .matcher,
+        .login,
     ]
 
     /// Enumerates the Kinds of rich notifications that include body text
     private static var kindsWithoutRichNotificationBodyText: Set<NotificationKind> = [
         .commentLike,
         .like,
+        .login,
     ]
 
     /// Indicates whether or not a given kind of rich notification has a body support.
@@ -49,6 +53,13 @@ extension NotificationKind {
         return kindsWithRichNotificationSupport.contains(kind)
     }
 
+    /// Indicates whether or not a given kind is view milestone.
+    /// - Parameter kind: the notification type to evaluate
+    /// - Returns: `true` if the notification kind is `viewMilestone`, `false` otherwise
+    static func isViewMilestone(_ kind: NotificationKind) -> Bool {
+        return kind == .viewMilestone
+    }
+
     /// Returns a client-side notification category. The category provides a match to ensure that the Long Look
     /// can be presented.
     ///
@@ -56,7 +67,7 @@ extension NotificationKind {
     ///
     var contentExtensionCategoryIdentifier: String? {
         switch self {
-        case .commentLike, .like, .matcher:
+        case .commentLike, .like, .matcher, .login:
             return rawValue
         default:
             return nil

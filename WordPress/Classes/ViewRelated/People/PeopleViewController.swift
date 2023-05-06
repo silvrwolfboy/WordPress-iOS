@@ -1,4 +1,5 @@
 import UIKit
+import Combine
 
 import CocoaLumberjack
 import WordPressShared
@@ -69,18 +70,16 @@ class PeopleViewController: UITableViewController, UIViewControllerRestoration {
         // Followers must be sorted out by creationDate!
         //
         switch filter {
-        case .followers:
+        case .followers, .email:
             return [NSSortDescriptor(key: "creationDate", ascending: true, selector: #selector(NSDate.compare(_:)))]
         default:
             return [NSSortDescriptor(key: "displayName", ascending: true, selector: #selector(NSString.localizedCaseInsensitiveCompare(_:)))]
         }
     }
 
-    /// Core Data Context
-    ///
-    private lazy var context: NSManagedObjectContext = {
-        return ContextManager.sharedInstance().newMainContextChildContext()
-    }()
+    private var viewContext: NSManagedObjectContext {
+        ContextManager.sharedInstance().mainContext
+    }
 
     /// Core Data FRC
     ///
@@ -90,7 +89,7 @@ class PeopleViewController: UITableViewController, UIViewControllerRestoration {
         request.predicate = self.predicate
         request.sortDescriptors = self.sortDescriptors
 
-        let frc = NSFetchedResultsController(fetchRequest: request, managedObjectContext: self.context, sectionNameKeyPath: nil, cacheName: nil)
+        let frc = NSFetchedResultsController(fetchRequest: request, managedObjectContext: viewContext, sectionNameKeyPath: nil, cacheName: nil)
         frc.delegate = self
         return frc
     }()
@@ -112,6 +111,11 @@ class PeopleViewController: UITableViewController, UIViewControllerRestoration {
     // MARK: UITableViewDataSource
 
     override func numberOfSections(in tableView: UITableView) -> Int {
+        guard !isInitialLoad else {
+            // Until the initial load has been completed, no data should be rendered in the table.
+            return 0
+        }
+
         return resultsController.sections?.count ?? 0
     }
 
@@ -122,6 +126,12 @@ class PeopleViewController: UITableViewController, UIViewControllerRestoration {
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         guard let cell = tableView.dequeueReusableCell(withIdentifier: "PeopleCell") as? PeopleCell else {
             fatalError()
+        }
+
+        guard let sections = resultsController.sections, sections[indexPath.section].numberOfObjects > indexPath.row else {
+            DDLogError("Error: PeopleViewController table tried to render a cell that didn't exist in Core Data")
+            cell.isHidden = true
+            return cell
         }
 
         let person = personAtIndexPath(indexPath)
@@ -162,7 +172,12 @@ class PeopleViewController: UITableViewController, UIViewControllerRestoration {
         super.viewWillAppear(animated)
         tableView.deselectSelectedRowWithAnimation(true)
         refreshNoResultsView()
-        WPAnalytics.track(.openedPeople)
+
+        guard let blog else {
+            return
+        }
+
+        WPAppAnalytics.track(.openedPeople, with: blog)
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -170,22 +185,18 @@ class PeopleViewController: UITableViewController, UIViewControllerRestoration {
         tableView.reloadData()
     }
 
-    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
-        if let personViewController = segue.destination as? PersonViewController,
-            let selectedIndexPath = tableView.indexPathForSelectedRow {
-            personViewController.context = context
-            personViewController.blog = blog
-            personViewController.person = personAtIndexPath(selectedIndexPath)
-            switch filter {
-            case .followers:
-                personViewController.screenMode = .Follower
-            case .users:
-                personViewController.screenMode = .User
-            case .viewers:
-                personViewController.screenMode = .Viewer
-            }
+    @IBSegueAction func createPersonViewController(_ coder: NSCoder) -> PersonViewController? {
+        guard let selectedIndexPath = tableView.indexPathForSelectedRow, let blog = blog else { return nil }
 
-        } else if let navController = segue.destination as? UINavigationController,
+        return PersonViewController(coder: coder,
+                                    blog: blog,
+                                    context: viewContext,
+                                    person: personAtIndexPath(selectedIndexPath),
+                                    screenMode: filter.screenMode)
+    }
+
+    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
+        if let navController = segue.destination as? UINavigationController,
             let inviteViewController = navController.topViewController as? InvitePersonViewController {
             inviteViewController.blog = blog
         }
@@ -218,7 +229,6 @@ class PeopleViewController: UITableViewController, UIViewControllerRestoration {
 
     @IBAction
     func refresh() {
-        resetManagedPeople()
         refreshPeople()
     }
 
@@ -263,10 +273,11 @@ private extension PeopleViewController {
 
         case users      = "users"
         case followers  = "followers"
+        case email      = "email"
         case viewers    = "viewers"
 
         static var defaultFilters: [Filter] {
-            return [.users, .followers]
+            return [.users, .followers, .email]
         }
 
         var title: String {
@@ -277,6 +288,8 @@ private extension PeopleViewController {
                 return NSLocalizedString("Followers", comment: "Blog Followers")
             case .viewers:
                 return NSLocalizedString("Viewers", comment: "Blog Viewers")
+            case .email:
+                return NSLocalizedString("Email Followers", comment: "Blog Email Followers")
             }
         }
 
@@ -288,6 +301,21 @@ private extension PeopleViewController {
                 return .follower
             case .viewers:
                 return .viewer
+            case .email:
+                return .emailFollower
+            }
+        }
+
+        var screenMode: PersonViewController.ScreenMode {
+            switch self {
+            case .users:
+                return .User
+            case .followers:
+                return .Follower
+            case .viewers:
+                return .Viewer
+            case .email:
+                return .Email
             }
         }
     }
@@ -351,7 +379,7 @@ private extension PeopleViewController {
     func resetManagedPeople() {
         isInitialLoad = true
 
-        guard let blog = blog, let service = PeopleService(blog: blog, context: context) else {
+        guard let blog = blog, let service = PeopleService(blog: blog, coreDataStack: ContextManager.shared) else {
             return
         }
 
@@ -373,7 +401,7 @@ private extension PeopleViewController {
     }
 
     func loadPeoplePage(_ offset: Int = 0, success: @escaping ((_ retrieved: Int, _ shouldLoadMore: Bool) -> Void)) {
-        guard let blog = blog, let service = PeopleService(blog: blog, context: context) else {
+        guard let blog = blog, let service = PeopleService(blog: blog, coreDataStack: ContextManager.shared) else {
             return
         }
 
@@ -384,13 +412,15 @@ private extension PeopleViewController {
             loadUsersPage(offset, success: success)
         case .viewers:
             service.loadViewersPage(offset, success: success)
+        case .email:
+            service.loadEmailFollowersPage(offset, success: success)
         }
     }
 
     func loadUsersPage(_ offset: Int = 0, success: @escaping ((_ retrieved: Int, _ shouldLoadMore: Bool) -> Void)) {
         guard let blog = blogInContext,
-            let peopleService = PeopleService(blog: blog, context: context),
-            let roleService = RoleService(blog: blog, context: context) else {
+            let peopleService = PeopleService(blog: blog, coreDataStack: ContextManager.shared),
+            let roleService = RoleService(blog: blog, coreDataStack: ContextManager.shared) else {
                 return
         }
 
@@ -408,7 +438,7 @@ private extension PeopleViewController {
         })
 
         group.enter()
-        roleService.fetchRoles(success: {_ in
+        roleService.fetchRoles(success: {
             group.leave()
         }, failure: { error in
             loadError = error
@@ -428,7 +458,7 @@ private extension PeopleViewController {
 
     var blogInContext: Blog? {
         guard let objectID = blog?.objectID,
-            let object = try? context.existingObject(with: objectID) else {
+            let object = try? viewContext.existingObject(with: objectID) else {
                 return nil
         }
 
@@ -438,32 +468,29 @@ private extension PeopleViewController {
     // MARK: No Results Helpers
 
     func refreshNoResultsView() {
-        noResultsViewController.removeFromView()
-
-        if isInitialLoad {
-            displayNoResultsView(forLoading: true)
-            return
-        }
-
         guard resultsController.fetchedObjects?.count == 0 else {
+            noResultsViewController.removeFromView()
             return
         }
 
-        displayNoResultsView()
+        displayNoResultsView(isLoading: isInitialLoad)
     }
 
-    func displayNoResultsView(forLoading: Bool = false) {
-        let accessoryView = forLoading ? NoResultsViewController.loadingAccessoryView() : nil
+    func displayNoResultsView(isLoading: Bool = false) {
+        let accessoryView = isLoading ? NoResultsViewController.loadingAccessoryView() : nil
         noResultsViewController.configure(title: noResultsTitle(), accessoryView: accessoryView)
-
-        addChild(noResultsViewController)
-        tableView.addSubview(withFadeAnimation: noResultsViewController.view)
 
         // Set the NRV top as the filterBar bottom so the NRV
         // adjusts correctly when refreshControl is active.
         let filterBarBottom = filterBar.frame.origin.y + filterBar.frame.size.height
         noResultsViewController.view.frame.origin.y = filterBarBottom
 
+        guard noResultsViewController.parent == nil else {
+            noResultsViewController.updateView()
+            return
+        }
+        addChild(noResultsViewController)
+        tableView.addSubview(withFadeAnimation: noResultsViewController.view)
         noResultsViewController.didMove(toParent: self)
     }
 
@@ -494,11 +521,10 @@ private extension PeopleViewController {
     }
 
     func role(person: Person) -> Role? {
-        guard let blog = blog,
-            let service = RoleService(blog: blog, context: context) else {
-                return nil
+        guard let blog = blog else {
+            return nil
         }
-        return service.getRole(slug: person.role)
+        return try? Role.lookup(withBlogID: blog.objectID, slug: person.role, in: viewContext)
     }
 
     func setupFilterBar() {
@@ -525,6 +551,8 @@ private extension PeopleViewController {
 
     func setupView() {
         title = NSLocalizedString("People", comment: "Noun. Title of the people management feature.")
+
+        extendedLayoutIncludesOpaqueBars = true
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add,
                                                             target: self,
@@ -557,5 +585,10 @@ extension PeopleViewController {
     func selectedFilterDidChange(_ filterBar: FilterTabBar) {
         let selectedFilter = Filter.allCases[filterBar.selectedIndex]
         filter = selectedFilter
+
+        guard let blog = blog else {
+            return
+        }
+        WPAnalytics.track(.peopleFilterChanged, properties: [:], blog: blog)
     }
 }

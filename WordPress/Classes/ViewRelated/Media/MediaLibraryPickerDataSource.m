@@ -2,7 +2,7 @@
 #import "Media.h"
 #import "MediaService.h"
 #import "Blog.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "WordPress-Swift.h"
 
 @interface  MediaLibraryPickerDataSource() <NSFetchedResultsControllerDelegate>
@@ -24,10 +24,27 @@
 
 @end
 
+@interface MediaLibraryGroup()
+@property (nonatomic, strong) Blog *blog;
+@property (nonatomic, assign) NSInteger itemsCount;
+@property (nonatomic, strong) NSManagedObjectID *imageMediaID;
+
+- (void)refreshImageMedia;
+@end
+
 @implementation MediaLibraryPickerDataSource
 
 - (instancetype)initWithBlog:(Blog *)blog
 {
+    /// Temporary logging to try and narrow down an issue:
+    ///
+    /// REF: https://github.com/wordpress-mobile/WordPress-iOS/issues/15335
+    ///
+    if (blog == nil || blog.objectID == nil) {
+        DDLogError(@"🔴 Error: missing object ID (please contact @diegoreymendez with this log)");
+        DDLogError(@"%@", [NSThread callStackSymbols]);
+    }
+    
     self = [super init];
     if (self) {
         _mediaGroup = [[MediaLibraryGroup alloc] initWithBlog:blog];
@@ -44,7 +61,7 @@
 }
 
 - (instancetype)initWithPost:(AbstractPost *)post
-{
+{    
     self = [self initWithBlog:post.blog];
     if (self) {
         _post = post;
@@ -139,6 +156,15 @@
     // try to sync from the server
     MediaCoordinator *mediaCoordinator = [MediaCoordinator shared];
 
+    /// Temporary logging to try and narrow down an issue:
+    ///
+    /// REF: https://github.com/wordpress-mobile/WordPress-iOS/issues/15335
+    ///
+    if (self.blog == nil || self.blog.objectID == nil) {
+        DDLogError(@"🔴 Error: missing object ID (please contact @diegoreymendez with this log)");
+        DDLogError(@"%@", [NSThread callStackSymbols]);
+    }
+    
     __block BOOL ignoreSyncError = self.ignoreSyncErrors;
     [mediaCoordinator syncMediaFor:self.blog
                            success:^{
@@ -281,8 +307,8 @@
     }
     PHFetchResult *result = [PHAsset fetchAssetsWithLocalIdentifiers:@[assetIdentifier] options:nil];
     PHAsset *asset = [result firstObject];
-    MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:self.blog.managedObjectContext];
-    [mediaService createMediaWith:asset blog:self.blog post: self.post progress:nil thumbnailCallback:nil completion:^(Media *media, NSError *error) {
+    MediaImportService *service = [[MediaImportService alloc] initWithContextManager:[ContextManager sharedInstance]];
+    [service createMediaWith:asset blog:self.blog post: self.post receiveUpdate:nil thumbnailCallback:nil completion:^(Media *media, NSError *error) {
         [self loadDataWithOptions:WPMediaLoadOptionsAssets success:^{
             completionBlock(media, error);
         } failure:^(NSError *error) {
@@ -296,13 +322,13 @@
 -(void)addMediaFromURL:(NSURL *)url
            completionBlock:(WPMediaAddedBlock)completionBlock
 {
-    MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:self.blog.managedObjectContext];
-    [mediaService createMediaWith:url
-                     blog:self.blog
-                     post:self.post
-                         progress:nil
-                   thumbnailCallback:nil
-                          completion:^(Media *media, NSError *error) {
+    MediaImportService *service = [[MediaImportService alloc] initWithContextManager:[ContextManager sharedInstance]];
+    [service createMediaWith:url
+                        blog:self.blog
+                        post:self.post
+               receiveUpdate:nil
+           thumbnailCallback:nil
+                  completion:^(Media *media, NSError *error) {
         [self loadDataWithOptions:WPMediaLoadOptionsAssets success:^{
             completionBlock(media, error);
         } failure:^(NSError *error) {
@@ -344,7 +370,7 @@
         return nil;
     }
     [mainContext performBlockAndWait:^{
-        NSManagedObjectID *assetID = [[[ContextManager sharedInstance] persistentStoreCoordinator] managedObjectIDForURIRepresentation:assetURL];
+        NSManagedObjectID *assetID = [[mainContext persistentStoreCoordinator] managedObjectIDForURIRepresentation:assetURL];
         media = (Media *)[mainContext objectWithID:assetID];
     }];
 
@@ -485,7 +511,9 @@
 
 
 - (void)controllerDidChangeContent:(NSFetchedResultsController *)controller {
-    if ([self.mediaChanged containsIndex:0] || [self.mediaInserted containsIndex:0] || [self.mediaRemoved containsIndex:0]) {
+    NSManagedObjectID *oldGroupMediaID = self.mediaGroup.imageMediaID;
+    [self.mediaGroup refreshImageMedia];
+    if (![oldGroupMediaID isEqual:self.mediaGroup.imageMediaID]) {
         [self notifyGroupObservers];
     }
     [self notifyObserversWithIncrementalChanges:YES
@@ -497,11 +525,6 @@
 
 @end
 
-@interface MediaLibraryGroup()
-    @property (nonatomic, strong) Blog *blog;
-    @property (nonatomic, assign) NSInteger itemsCount;
-@end
-
 @implementation MediaLibraryGroup
 
 - (instancetype)initWithBlog:(Blog *)blog
@@ -510,9 +533,18 @@
     if (self) {
         _blog = blog;
         _filter = WPMediaTypeAll;
-        _itemsCount = NSNotFound;        
+        _itemsCount = NSNotFound;
+        [self refreshImageMedia];
     }
     return self;
+}
+
+- (void)setFilter:(WPMediaType)filter {
+    if (_filter != filter) {
+        _filter = filter;
+
+        [self refreshImageMedia];
+    }
 }
 
 - (id)baseGroup
@@ -525,27 +557,38 @@
     return NSLocalizedString(@"WordPress Media", @"Name for the WordPress Media Library");
 }
 
-- (WPMediaRequestID)imageWithSize:(CGSize)size completionHandler:(WPMediaImageBlock)completionHandler
+- (void)refreshImageMedia
 {
     NSString *entityName = NSStringFromClass([Media class]);
     NSFetchRequest *request = [NSFetchRequest fetchRequestWithEntityName:entityName];
     request.predicate = [MediaLibraryPickerDataSource predicateForFilter:self.filter blog:self.blog];
     NSSortDescriptor *sortDescriptor = [NSSortDescriptor sortDescriptorWithKey:@"creationDate" ascending:NO];
     request.sortDescriptors = @[sortDescriptor];
+    request.fetchLimit = 1;
     NSError *error;
     NSArray *mediaAssets = [[[ContextManager sharedInstance] mainContext] executeFetchRequest:request error:&error];
-    if (mediaAssets.count == 0)
-    {
-        if (completionHandler){
-            completionHandler(nil, nil);
-        }
-    }
     Media *media = [mediaAssets firstObject];
-    if (!media) {
+    self.imageMediaID = media.objectID;
+}
+
+- (WPMediaRequestID)imageWithSize:(CGSize)size completionHandler:(WPMediaImageBlock)completionHandler
+{
+    Media *media = nil;
+
+    if (self.imageMediaID == nil) {
+        [self refreshImageMedia];
+    }
+
+    if (self.imageMediaID != nil) {
+        media = [[[ContextManager sharedInstance] mainContext] existingObjectWithID:self.imageMediaID error:nil];
+    }
+
+    if (media == nil) {
         UIImage *placeholderImage = [UIImage imageNamed:@"WordPress-share"];
         completionHandler(placeholderImage, nil);
         return 0;
     }
+
     return [media imageWithSize:size completionHandler:completionHandler];
 }
 
@@ -572,22 +615,23 @@
         [mediaTypes addObject:@(MediaTypeAudio)];
     }
 
-    NSManagedObjectContext *mainContext = [[ContextManager sharedInstance] newDerivedContext];
-    MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:mainContext];
-    NSInteger count = [mediaService getMediaLibraryCountForBlog:self.blog
-                                                  forMediaTypes:mediaTypes];
-    // If we have a count diferent of zero assume it's correct but sync with the server always in the background
+    NSInteger count = [self.blog mediaLibraryCountForTypes:mediaTypes];
+    // If we have a count difference of zero, we assume it's correct. But we still sync with the server in the background.
     if (count != 0) {
         self.itemsCount = count;
     }
+
     __weak __typeof__(self) weakSelf = self;
-    [mediaService getMediaLibraryServerCountForBlog:self.blog forMediaTypes:mediaTypes success:^(NSInteger count) {
-        weakSelf.itemsCount = count;
-        completionHandler(count, nil);
-    } failure:^(NSError * _Nonnull error) {
-        DDLogError(@"%@", [error localizedDescription]);
-        weakSelf.itemsCount = count;
-        completionHandler(count, error);
+    [[ContextManager sharedInstance] performAndSaveUsingBlock:^(NSManagedObjectContext *context) {
+        MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:context];
+        [mediaService getMediaLibraryServerCountForBlog:self.blog forMediaTypes:mediaTypes success:^(NSInteger count) {
+            weakSelf.itemsCount = count;
+            completionHandler(count, nil);
+        } failure:^(NSError * _Nonnull error) {
+            DDLogError(@"%@", [error localizedDescription]);
+            weakSelf.itemsCount = count;
+            completionHandler(count, error);
+        }];
     }];
 
     return self.itemsCount;

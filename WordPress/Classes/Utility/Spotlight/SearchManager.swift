@@ -253,8 +253,8 @@ fileprivate extension SearchManager {
                    onSuccess: @escaping (_ post: AbstractPost) -> Void,
                    onFailure: @escaping () -> Void) {
         let context = ContextManager.sharedInstance().mainContext
-        let blogService = BlogService(managedObjectContext: context)
-        guard let blog = blogService.blog(byBlogId: blogID) else {
+
+        guard let blog = Blog.lookup(withID: blogID, in: context) else {
                 onFailure()
                 return
         }
@@ -272,11 +272,9 @@ fileprivate extension SearchManager {
                              onSuccess: @escaping (_ post: AbstractPost) -> Void,
                              onFailure: @escaping () -> Void) {
         let context = ContextManager.sharedInstance().mainContext
-        let blogService = BlogService(managedObjectContext: context)
-        guard let selfHostedBlogs = blogService.blogsWithNoAccount() as? [Blog],
-            let blog = selfHostedBlogs.filter({ $0.xmlrpc == blogXMLRpcString }).first else {
-                onFailure()
-                return
+        guard let blog = Blog.selfHosted(in: context).first(where: { $0.xmlrpc == blogXMLRpcString }) else {
+            onFailure()
+            return
         }
 
         let postService = PostService(managedObjectContext: context)
@@ -291,8 +289,8 @@ fileprivate extension SearchManager {
                    onSuccess: @escaping (_ blog: Blog) -> Void,
                    onFailure: @escaping () -> Void) {
         let context = ContextManager.sharedInstance().mainContext
-        let blogService = BlogService(managedObjectContext: context)
-        guard let blog = blogService.blog(byBlogId: blogID) else {
+
+        guard let blog = Blog.lookup(withID: blogID, in: context) else {
             onFailure()
             return
         }
@@ -303,11 +301,9 @@ fileprivate extension SearchManager {
                              onSuccess: @escaping (_ blog: Blog) -> Void,
                              onFailure: @escaping () -> Void) {
         let context = ContextManager.sharedInstance().mainContext
-        let blogService = BlogService(managedObjectContext: context)
-        guard let selfHostedBlogs = blogService.blogsWithNoAccount() as? [Blog],
-            let blog = selfHostedBlogs.filter({ $0.xmlrpc == blogXMLRpcString }).first else {
-                onFailure()
-                return
+        guard let blog = Blog.selfHosted(in: context).first(where: { $0.xmlrpc == blogXMLRpcString }) else {
+            onFailure()
+            return
         }
         onSuccess(blog)
     }
@@ -315,47 +311,47 @@ fileprivate extension SearchManager {
     // MARK: Site Tab Navigation
 
     func openMySitesTab() -> Bool {
-        WPTabBarController.sharedInstance().showMySitesTab()
+        RootViewCoordinator.sharedPresenter.showMySitesTab()
         return true
     }
 
     func openSiteDetailsScreen(for blog: Blog) {
-        WPTabBarController.sharedInstance().switchMySitesTabToBlogDetails(for: blog)
+        RootViewCoordinator.sharedPresenter.showBlogDetails(for: blog)
     }
 
     // MARK: Reader Tab Navigation
 
     func openReaderTab() -> Bool {
-        WPTabBarController.sharedInstance().showReaderTab()
+        RootViewCoordinator.sharedPresenter.showReaderTab()
         return true
     }
 
     // MARK: Me Tab Navigation
 
     func openMeTab() -> Bool {
-        WPTabBarController.sharedInstance().showMeScene()
+        RootViewCoordinator.sharedPresenter.showMeScene()
         return true
     }
 
     func openAppSettingsScreen() -> Bool {
-        WPTabBarController.sharedInstance().navigateToAppSettings()
+        RootViewCoordinator.sharedPresenter.navigateToAppSettings()
         return true
     }
 
     func openSupportScreen() -> Bool {
-        WPTabBarController.sharedInstance().navigateToSupport()
+        RootViewCoordinator.sharedPresenter.navigateToSupport()
         return true
     }
 
     // MARK: Notification Tab Navigation
 
     func openNotificationsTab() -> Bool {
-        WPTabBarController.sharedInstance().showNotificationsTab()
+        RootViewCoordinator.sharedPresenter.showNotificationsTab()
         return true
     }
 
     func openNotificationSettingsScreen() -> Bool {
-        WPTabBarController.sharedInstance().switchNotificationsTabToNotificationSettings()
+        RootViewCoordinator.sharedPresenter.switchNotificationsTabToNotificationSettings()
         return true
     }
 
@@ -402,9 +398,9 @@ fileprivate extension SearchManager {
     func openListView(for apost: AbstractPost) {
         closePreviewIfNeeded(for: apost)
         if let post = apost as? Post {
-            WPTabBarController.sharedInstance().switchTabToPostsList(for: post)
+            RootViewCoordinator.sharedPresenter.showPosts(for: post.blog)
         } else if let page = apost as? Page {
-            WPTabBarController.sharedInstance().switchTabToPagesList(for: page)
+            RootViewCoordinator.sharedPresenter.showPages(for: page.blog)
         }
     }
 
@@ -416,7 +412,7 @@ fileprivate extension SearchManager {
                 onFailure()
                 return
         }
-        WPTabBarController.sharedInstance().showReaderTab(forPost: postID, onBlog: blogID)
+        RootViewCoordinator.sharedPresenter.showReaderTab(forPost: postID, onBlog: blogID)
     }
 
     func openReader(for postID: NSNumber, siteID: NSNumber, onFailure: () -> Void) {
@@ -425,7 +421,7 @@ fileprivate extension SearchManager {
             onFailure()
             return
         }
-        WPTabBarController.sharedInstance().showReaderTab(forPost: postID, onBlog: siteID)
+        RootViewCoordinator.sharedPresenter.showReaderTab(forPost: postID, onBlog: siteID)
     }
 
     // MARK: - Editor
@@ -435,50 +431,31 @@ fileprivate extension SearchManager {
         openListView(for: post)
         let editor = EditPostViewController.init(post: post)
         editor.modalPresentationStyle = .fullScreen
-        WPTabBarController.sharedInstance().present(editor, animated: true)
+        RootViewCoordinator.sharedPresenter.rootViewController.present(editor, animated: true)
     }
 
     func openEditor(for page: Page) {
         closePreviewIfNeeded(for: page)
         openListView(for: page)
-        let editorFactory = EditorFactory()
 
-        let editor = editorFactory.instantiateEditor(
-            for: page,
-            replaceEditor: { [weak self] (editor, replacement) in
-                self?.replaceEditor(editor: editor, replacement: replacement)
-        })
-
-        open(editor)
-    }
-
-    private func open(_ editor: EditorViewController) {
-        editor.onClose = { [unowned editor] changesSaved, _ in
-            editor.dismiss(animated: true)
-        }
-
-        let navController = UINavigationController(rootViewController: editor)
-        navController.restorationIdentifier = Restorer.Identifier.navigationController.rawValue
-        navController.modalPresentationStyle = .fullScreen
-        WPTabBarController.sharedInstance().present(navController, animated: true)
-    }
-
-    func replaceEditor(editor: EditorViewController, replacement: EditorViewController) {
-        editor.dismiss(animated: true) { [weak self] in
-            self?.open(replacement)
-        }
+        let editorViewController = EditPageViewController(page: page)
+        RootViewCoordinator.sharedPresenter.rootViewController.present(editorViewController, animated: false)
     }
 
     // MARK: - Preview
 
     func openPreview(for apost: AbstractPost) {
-        WPTabBarController.sharedInstance().showMySitesTab()
+        RootViewCoordinator.sharedPresenter.showMySitesTab()
         closePreviewIfNeeded(for: apost)
 
-        let controller = PreviewWebKitViewController(post: apost)
+        let controller = PreviewWebKitViewController(post: apost, source: "spotlight_preview_post")
         controller.trackOpenEvent()
         let navWrapper = LightNavigationController(rootViewController: controller)
-        WPTabBarController.sharedInstance().present(navWrapper, animated: true)
+        let rootViewController = RootViewCoordinator.sharedPresenter.rootViewController
+        if rootViewController.traitCollection.userInterfaceIdiom == .pad {
+            navWrapper.modalPresentationStyle = .fullScreen
+        }
+        rootViewController.present(navWrapper, animated: true)
 
         openListView(for: apost)
     }
@@ -487,7 +464,8 @@ fileprivate extension SearchManager {
     /// AbstractPost, leave it open, otherwise close it.
     ///
     func closePreviewIfNeeded(for apost: AbstractPost) {
-        guard let navController = WPTabBarController.sharedInstance().presentedViewController as? UINavigationController else {
+        let rootViewController = RootViewCoordinator.sharedPresenter.rootViewController
+        guard let navController = rootViewController.presentedViewController as? UINavigationController else {
             return
         }
 
@@ -503,7 +481,8 @@ fileprivate extension SearchManager {
     /// If there is any post preview window open, close it.
     ///
     func closeAnyOpenPreview() {
-        guard let navController = WPTabBarController.sharedInstance().presentedViewController as? UINavigationController,
+        let rootViewController = RootViewCoordinator.sharedPresenter.rootViewController
+        guard let navController = rootViewController.presentedViewController as? UINavigationController,
             navController.topViewController is PreviewWebKitViewController else {
                 return
         }

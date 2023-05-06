@@ -1,26 +1,10 @@
 import XCTest
 @testable import WordPress
 
-class MediaTests: XCTestCase {
-
-    fileprivate var contextManager: TestContextManager!
-    fileprivate var context: NSManagedObjectContext!
+class MediaTests: CoreDataTestCase {
 
     fileprivate func newTestMedia() -> Media {
-        return NSEntityDescription.insertNewObject(forEntityName: Media.classNameWithoutNamespaces(), into: context) as! Media
-    }
-
-    override func setUp() {
-        super.setUp()
-        contextManager = TestContextManager()
-        context = NSManagedObjectContext(concurrencyType: .mainQueueConcurrencyType)
-        context.parent = contextManager.mainContext
-    }
-
-    override func tearDown() {
-        context.rollback()
-        ContextManager.overrideSharedInstance(nil)
-        super.tearDown()
+        return NSEntityDescription.insertNewObject(forEntityName: Media.classNameWithoutNamespaces(), into: mainContext) as! Media
     }
 
     func testThatAbsoluteURLsWork() {
@@ -68,7 +52,7 @@ class MediaTests: XCTestCase {
     }
 
     func testMediaHasAssociatedPost() {
-        let post = PostBuilder(context).build()
+        let post = PostBuilder(mainContext).build()
         let media = newTestMedia()
         media.addPostsObject(post)
 
@@ -103,5 +87,31 @@ class MediaTests: XCTestCase {
 
         media.resetAutoUploadFailureCount()
         XCTAssertEqual(media.autoUploadFailureCount, 0)
+    }
+
+    func testMediaCount() {
+        let blog = BlogBuilder(mainContext).build()
+        let addMedia: (MediaType, Int) -> Void = { type, count in
+            for _ in 1...count {
+                let media = self.newTestMedia()
+                media.mediaType = type
+                media.blog = blog
+            }
+        }
+        addMedia(.image, 1)
+        addMedia(.video, 2)
+        addMedia(.document, 3)
+        addMedia(.powerpoint, 4)
+        addMedia(.audio, 5)
+        contextManager.saveContextAndWait(mainContext)
+
+        XCTAssertEqual(blog.mediaLibraryCount(types: [MediaType.image.rawValue]), 1)
+        XCTAssertEqual(blog.mediaLibraryCount(types: [MediaType.video.rawValue]), 2)
+        XCTAssertEqual(blog.mediaLibraryCount(types: [MediaType.document.rawValue]), 3)
+        XCTAssertEqual(blog.mediaLibraryCount(types: [MediaType.powerpoint.rawValue]), 4)
+        XCTAssertEqual(blog.mediaLibraryCount(types: [MediaType.audio.rawValue]), 5)
+
+        XCTAssertEqual(blog.mediaLibraryCount(types: [MediaType.image.rawValue, MediaType.video.rawValue]), 3)
+        XCTAssertEqual(blog.mediaLibraryCount(types: [MediaType.audio.rawValue, MediaType.powerpoint.rawValue]), 9)
     }
 }

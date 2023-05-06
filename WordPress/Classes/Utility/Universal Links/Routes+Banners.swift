@@ -11,6 +11,10 @@ import Foundation
 ///
 struct AppBannerRoute: Route {
     let path = "/get"
+    let section: DeepLinkSection? = nil
+    let source: DeepLinkSource = .banner
+    let shouldTrack: Bool = false
+    let jetpackPowered: Bool = false
 
     var action: NavigationAction {
         return self
@@ -18,7 +22,7 @@ struct AppBannerRoute: Route {
 }
 
 extension AppBannerRoute: NavigationAction {
-    func perform(_ values: [String: String], source: UIViewController? = nil) {
+    func perform(_ values: [String: String], source: UIViewController? = nil, router: LinkRouter) {
         guard let fragmentValue = values[MatchedRouteURLComponentKey.fragment.rawValue],
             let fragment = fragmentValue.removingPercentEncoding else {
                 return
@@ -32,9 +36,7 @@ extension AppBannerRoute: NavigationAction {
         components.path = fragment
 
         if let url = components.url {
-            // We disable tracking when passing the URL back through the router,
-            // otherwise we'd be posting two stats events.
-            UniversalLinkRouter.shared.handle(url: url, shouldTrack: false)
+            router.handle(url: url, shouldTrack: true, source: .banner)
         }
     }
 }

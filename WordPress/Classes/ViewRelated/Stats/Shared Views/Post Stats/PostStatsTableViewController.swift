@@ -26,7 +26,7 @@ class PostStatsTableViewController: UITableViewController, StoryboardLoadable {
     private var changeReceipt: Receipt?
 
     private lazy var tableHandler: ImmuTableViewHandler = {
-        return ImmuTableViewHandler(takeOver: self)
+        return ImmuTableViewHandler(takeOver: self, with: self)
     }()
 
     // MARK: - View
@@ -35,13 +35,17 @@ class PostStatsTableViewController: UITableViewController, StoryboardLoadable {
         super.viewDidLoad()
         navigationItem.title = NSLocalizedString("Post Stats", comment: "Window title for Post Stats view.")
         refreshControl?.addTarget(self, action: #selector(userInitiatedRefresh), for: .valueChanged)
+        tableView.estimatedSectionHeaderHeight = SiteStatsTableHeaderView.estimatedHeight
         Style.configureTable(tableView)
         ImmuTable.registerRows(tableRowTypes(), tableView: tableView)
-        tableView.register(SiteStatsTableHeaderView.defaultNib,
-                           forHeaderFooterViewReuseIdentifier: SiteStatsTableHeaderView.defaultNibName)
         initViewModel()
         trackAccessEvent()
         addWillEnterForegroundObserver()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        JetpackFeaturesRemovalCoordinator.presentOverlayIfNeeded(in: self, source: .stats)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -56,7 +60,7 @@ class PostStatsTableViewController: UITableViewController, StoryboardLoadable {
     }
 
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        guard let cell = tableView.dequeueReusableHeaderFooterView(withIdentifier: SiteStatsTableHeaderView.defaultNibName) as? SiteStatsTableHeaderView else {
+        guard let cell = Bundle.main.loadNibNamed("SiteStatsTableHeaderView", owner: nil, options: nil)?.first as? SiteStatsTableHeaderView else {
             return nil
         }
 
@@ -70,10 +74,6 @@ class PostStatsTableViewController: UITableViewController, StoryboardLoadable {
         cell.animateGhostLayers(viewModel?.isFetchingPostDetails() == true)
         tableHeaderView = cell
         return cell
-    }
-
-    override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return SiteStatsTableHeaderView.headerHeight()
     }
 
 }
@@ -187,7 +187,7 @@ private extension PostStatsTableViewController {
 extension PostStatsTableViewController: PostStatsDelegate {
 
     func displayWebViewWithURL(_ url: URL) {
-        let webViewController = WebViewControllerFactory.controllerAuthenticatedWithDefaultAccount(url: url)
+        let webViewController = WebViewControllerFactory.controllerAuthenticatedWithDefaultAccount(url: url, source: "stats_post_stats")
         let navController = UINavigationController.init(rootViewController: webViewController)
         present(navController, animated: true)
     }
@@ -244,12 +244,12 @@ extension PostStatsTableViewController: NoResultsViewHost {
         configureAndDisplayNoResults(on: tableView,
                                      title: NoResultConstants.errorTitle,
                                      subtitle: NoResultConstants.errorSubtitle,
-                                     buttonTitle: NoResultConstants.refreshButtonTitle) { [weak self] noResults in
+                                     buttonTitle: NoResultConstants.refreshButtonTitle, customizationBlock: { [weak self] noResults in
                                         noResults.delegate = self
                                         if !noResults.isReachable {
                                             noResults.resetButtonText()
                                         }
-        }
+                                     })
     }
 
     private enum NoResultConstants {

@@ -11,9 +11,30 @@ enum StatsRoute {
     case dayCategory
     case annualStats
     case activityLog
+
+    var timePeriod: StatsPeriodType? {
+        switch self {
+        case .daySite:
+            return .days
+        case .weekSite:
+            return .weeks
+        case .monthSite:
+            return .months
+        case .yearSite:
+            return .years
+        case .insights:
+            return .insights
+        default:
+            return nil
+        }
+    }
 }
 
 extension StatsRoute: Route {
+    var section: DeepLinkSection? {
+        return .stats
+    }
+
     var action: NavigationAction {
         return self
     }
@@ -42,13 +63,15 @@ extension StatsRoute: Route {
             return "/stats/activity/:domain"
         }
     }
+
+    var jetpackPowered: Bool {
+        return true
+    }
 }
 
 extension StatsRoute: NavigationAction {
-    func perform(_ values: [String: String], source: UIViewController? = nil) {
-        guard let coordinator = WPTabBarController.sharedInstance().mySitesCoordinator else {
-            return
-        }
+    func perform(_ values: [String: String], source: UIViewController? = nil, router: LinkRouter) {
+        let coordinator = RootViewCoordinator.sharedPresenter.mySitesCoordinator
 
         switch self {
         case .root:
@@ -102,7 +125,7 @@ extension StatsRoute: NavigationAction {
         WPAppAnalytics.track(.deepLinkFailed, withProperties: ["route": path])
 
         if failAndBounce(values) == false {
-            coordinator.showMySites()
+            coordinator.showRootViewController()
             postFailureNotice(title: NSLocalizedString("Site not found",
                                                        comment: "Error notice shown if the app can't find a specific site belonging to the user"))
         }
@@ -115,30 +138,11 @@ extension StatsRoute: NavigationAction {
         // In this case, we'll check whether the last component is actually a
         // time period, and if so we'll show that time period for the default site.
         guard let component = values["domain"],
-            let timePeriod = StatsPeriodType.fromString(component),
-            let blog = defaultBlog() else {
+              let timePeriod = StatsPeriodType(from: component),
+              let blog = defaultBlog() else {
             return
         }
 
         coordinator.showStats(for: blog, timePeriod: timePeriod)
-    }
-}
-
-private extension StatsPeriodType {
-    static func fromString(_ string: String) -> StatsPeriodType? {
-        switch string {
-        case "day":
-            return .days
-        case "week":
-            return .weeks
-        case "month":
-            return .months
-        case "year":
-            return .years
-        case "insights":
-            return .insights
-        default:
-            return nil
-        }
     }
 }

@@ -10,10 +10,15 @@
     WPBlogSelectorButton *button = [WPBlogSelectorButton buttonWithType:UIButtonTypeSystem];
     button.buttonStyle = buttonStyle;
     button.frame = frame;
-    button.titleLabel.textColor = [UIColor whiteColor];
+
+    button.titleLabel.textColor = [UIColor murielAppBarText];
+
+    button.tintColor = [UIColor murielAppBarText];
+    button.titleLabel.font = [WPStyleGuide navigationBarStandardFont];
+
     button.titleLabel.adjustsFontSizeToFitWidth = NO;
     [button setImage:[UIImage imageNamed:@"icon-nav-chevron"] forState:UIControlStateNormal];
-    [button setAccessibilityHint:NSLocalizedString(@"Tap to select which blog to post to", @"This is the blog picker in the editor")];
+    [button setAccessibilityHint: NSLocalizedString(@"Tap to select which blog to post to", @"This is the blog picker in the editor")];
 
     [button invertLayout];
 

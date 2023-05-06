@@ -27,7 +27,7 @@ final class KeychainTools: NSObject {
             return
         }
 
-        guard let item = UserDefaults.standard.value(forKey: keychainDebugWipeArgument) as? String else {
+        guard let item = UserPersistentStoreFactory.instance().object(forKey: keychainDebugWipeArgument) as? String else {
             return
         }
 
@@ -42,7 +42,7 @@ final class KeychainTools: NSObject {
     static fileprivate func serviceForItem(_ item: String) -> String? {
         switch item {
         case "wordpress.com":
-            return "public-api.wordpress.com"
+            return AppConstants.authKeychainServiceName
         case "*", "all":
             return nil
         default:

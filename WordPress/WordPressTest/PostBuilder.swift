@@ -198,10 +198,12 @@ class PostBuilder {
     }
 
     func build() -> Post {
+        // TODO: Enable this assertion once we can ensure that the post's MOC isn't being deallocated after the `PostBuilder` is
+        // assert(post.managedObjectContext != nil)
         return post
     }
 
-    private static func setUpInMemoryManagedObjectContext() -> NSManagedObjectContext {
+    static func setUpInMemoryManagedObjectContext() -> NSManagedObjectContext {
         let managedObjectModel = NSManagedObjectModel.mergedModel(from: [Bundle.main])!
 
         let persistentStoreCoordinator = NSPersistentStoreCoordinator(managedObjectModel: managedObjectModel)

@@ -32,7 +32,8 @@ enum ReaderSaveForLaterOrigin {
         }
     }
 
-    fileprivate var viewAllPostsValue: String {
+    // TODO: - READERNAV - Refactor this and ReaderStreamViewController+Helper once the old reader is removed
+    var viewAllPostsValue: String {
         switch self {
         case .savedStream:
             return "post_list_saved_post_notice"
@@ -65,24 +66,19 @@ extension ReaderSaveForLaterAction {
     func trackViewAllSavedPostsAction(origin: ReaderSaveForLaterOrigin) {
         let properties = [ readerSaveForLaterSourceKey: origin.viewAllPostsValue ]
 
-        WPAppAnalytics.track(.readerSavedListViewed, withProperties: properties)
-    }
-}
-
-extension ReaderMenuViewController {
-    func trackSavedPostsNavigation() {
-        WPAppAnalytics.track(.readerSavedListViewed, withProperties: [ readerSaveForLaterSourceKey: ReaderSaveForLaterOrigin.readerMenu.viewAllPostsValue ])
-    }
-}
-
-extension ReaderSavedPostsViewController {
-    func trackSavedPostNavigation() {
-        WPAppAnalytics.track(.readerSavedPostOpened, withProperties: [ readerSaveForLaterSourceKey: ReaderSaveForLaterOrigin.savedStream.openPostValue ])
+        WPAnalytics.trackReader(.readerSavedListShown, properties: properties)
     }
 }
 
 extension ReaderStreamViewController {
     func trackSavedPostNavigation() {
-        WPAppAnalytics.track(.readerSavedPostOpened, withProperties: [ readerSaveForLaterSourceKey: ReaderSaveForLaterOrigin.otherStream.openPostValue ])
+        if contentType == .saved {
+            WPAppAnalytics.track(.readerSavedPostOpened,
+                                 withProperties: [readerSaveForLaterSourceKey: ReaderSaveForLaterOrigin.savedStream.openPostValue])
+        } else {
+            // TODO: - READERNAV - See refactor note in ReaderSaveForLater+Analytics.viewAllPostsValue.
+            WPAppAnalytics.track(.readerSavedPostOpened,
+                                 withProperties: [readerSaveForLaterSourceKey: ReaderSaveForLaterOrigin.otherStream.openPostValue])
+        }
     }
 }

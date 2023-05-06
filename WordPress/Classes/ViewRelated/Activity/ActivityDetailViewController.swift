@@ -2,7 +2,13 @@ import UIKit
 import Gridicons
 import WordPressUI
 
-class ActivityDetailViewController: UIViewController {
+class ActivityDetailViewController: UIViewController, StoryboardLoadable {
+
+    // MARK: - StoryboardLoadable Protocol
+
+    static var defaultStoryboardName = defaultControllerID
+
+    // MARK: - Properties
 
     var formattableActivity: FormattableActivity? {
         didSet {
@@ -12,7 +18,9 @@ class ActivityDetailViewController: UIViewController {
     }
     var site: JetpackSiteRef?
 
-    weak var rewindPresenter: ActivityRewindPresenter?
+    var rewindStatus: RewindStatus?
+
+    weak var presenter: ActivityPresenter?
 
     @IBOutlet private var imageView: CircularImageView!
 
@@ -28,18 +36,24 @@ class ActivityDetailViewController: UIViewController {
         }
     }
 
+    @IBOutlet weak var jetpackBadgeView: UIView!
+
     //TODO: remove!
     @IBOutlet private var textLabel: UILabel!
     @IBOutlet private var summaryLabel: UILabel!
 
     @IBOutlet private var headerStackView: UIStackView!
     @IBOutlet private var rewindStackView: UIStackView!
+    @IBOutlet private var backupStackView: UIStackView!
     @IBOutlet private var contentStackView: UIStackView!
     @IBOutlet private var containerView: UIView!
+
+    @IBOutlet weak var warningButton: MultilineButton!
 
     @IBOutlet private var bottomConstaint: NSLayoutConstraint!
 
     @IBOutlet private var rewindButton: UIButton!
+    @IBOutlet private var backupButton: UIButton!
 
     private var activity: Activity?
 
@@ -50,11 +64,33 @@ class ActivityDetailViewController: UIViewController {
         setupViews()
         setupText()
         setupAccesibility()
-        WPAnalytics.track(.activityLogDetailViewed)
+        hideRestoreIfNeeded()
+        showWarningIfNeeded()
+        WPAnalytics.track(.activityLogDetailViewed, withProperties: ["source": presentedFrom()])
     }
 
     @IBAction func rewindButtonTapped(sender: UIButton) {
-        rewindPresenter?.presentRewindFor(activity: activity!)
+        guard let activity = activity else {
+            return
+        }
+        presenter?.presentRestoreFor(activity: activity, from: "\(presentedFrom())/detail")
+    }
+
+    @IBAction func backupButtonTapped(sender: UIButton) {
+        guard let activity = activity else {
+            return
+        }
+        presenter?.presentBackupFor(activity: activity, from: "\(presentedFrom())/detail")
+    }
+
+    @IBAction func warningTapped(_ sender: Any) {
+        guard let url = URL(string: Constants.supportUrl) else {
+            return
+        }
+
+        let navController = UINavigationController(rootViewController: WebViewControllerFactory.controller(url: url, source: "activity_detail_warning"))
+
+        present(navController, animated: true)
     }
 
     private func setupLabelStyles() {
@@ -70,6 +106,9 @@ class ActivityDetailViewController: UIViewController {
 
         rewindButton.setTitleColor(.primary, for: .normal)
         rewindButton.setTitleColor(.primaryDark, for: .highlighted)
+
+        backupButton.setTitleColor(.primary, for: .normal)
+        backupButton.setTitleColor(.primaryDark, for: .highlighted)
     }
 
     private func setupViews() {
@@ -85,24 +124,61 @@ class ActivityDetailViewController: UIViewController {
         textView.textContainer.lineFragmentPadding = 0
 
         if activity.isRewindable {
-            rewindStackView.isHidden = false
             bottomConstaint.constant = 0
+            rewindStackView.isHidden = false
+            backupStackView.isHidden = false
         }
 
         if let avatar = activity.actor?.avatarURL, let avatarURL = URL(string: avatar) {
             imageView.backgroundColor = .neutral(.shade20)
-            imageView.downloadImage(from: avatarURL, placeholderImage: Gridicon.iconOfType(.user, withSize: Constants.gridiconSize))
+            imageView.downloadImage(from: avatarURL, placeholderImage: .gridicon(.user, size: Constants.gridiconSize))
         } else if let iconType = WPStyleGuide.ActivityStyleGuide.getGridiconTypeForActivity(activity) {
             imageView.contentMode = .center
             imageView.backgroundColor = WPStyleGuide.ActivityStyleGuide.getColorByActivityStatus(activity)
-            let image = Gridicon.iconOfType(iconType, withSize: Constants.gridiconSize)
-            imageView.image = image
+            imageView.image = .gridicon(iconType, size: Constants.gridiconSize)
         } else {
             imageView.isHidden = true
         }
 
         rewindButton.naturalContentHorizontalAlignment = .leading
-        rewindButton.setImage(Gridicon.iconOfType(.history, withSize: Constants.gridiconSize), for: .normal)
+        rewindButton.setImage(.gridicon(.history, size: Constants.gridiconSize), for: .normal)
+
+        backupButton.naturalContentHorizontalAlignment = .leading
+        backupButton.setImage(.gridicon(.cloudDownload, size: Constants.gridiconSize), for: .normal)
+
+        let attributedTitle = WPStyleGuide.Jetpack.highlightString(RewindStatus.Strings.multisiteNotAvailableSubstring,
+                                                                   inString: RewindStatus.Strings.multisiteNotAvailable)
+
+        warningButton.setAttributedTitle(attributedTitle, for: .normal)
+        warningButton.setTitleColor(.systemGray, for: .normal)
+        warningButton.titleLabel?.numberOfLines = 0
+        warningButton.titleLabel?.lineBreakMode = .byWordWrapping
+        warningButton.naturalContentHorizontalAlignment = .leading
+        warningButton.backgroundColor = view.backgroundColor
+        setupJetpackBadge()
+    }
+
+    private func setupJetpackBadge() {
+        guard JetpackBrandingVisibility.all.enabled else {
+            return
+        }
+        jetpackBadgeView.isHidden = false
+        let textProvider = JetpackBrandingTextProvider(screen: JetpackBadgeScreen.activityDetail)
+        let jetpackBadgeButton = JetpackButton(style: .badge, title: textProvider.brandingText())
+        jetpackBadgeButton.translatesAutoresizingMaskIntoConstraints = false
+        jetpackBadgeButton.addTarget(self, action: #selector(jetpackButtonTapped), for: .touchUpInside)
+        jetpackBadgeView.addSubview(jetpackBadgeButton)
+        NSLayoutConstraint.activate([
+            jetpackBadgeButton.centerXAnchor.constraint(equalTo: jetpackBadgeView.centerXAnchor),
+            jetpackBadgeButton.topAnchor.constraint(equalTo: jetpackBadgeView.topAnchor, constant: Constants.jetpackBadgeTopInset),
+            jetpackBadgeButton.bottomAnchor.constraint(equalTo: jetpackBadgeView.bottomAnchor)
+        ])
+        jetpackBadgeView.backgroundColor = .listBackground
+    }
+
+    @objc private func jetpackButtonTapped() {
+        JetpackBrandingCoordinator.presentOverlay(from: self)
+        JetpackBrandingAnalyticsHelper.trackJetpackPoweredBadgeTapped(screen: .activityDetail)
     }
 
     private func setupText() {
@@ -117,10 +193,12 @@ class ActivityDetailViewController: UIViewController {
         textView.attributedText = formattableActivity?.formattedContent(using: ActivityContentStyles())
         summaryLabel.text = activity.summary
 
-        rewindButton.setTitle(NSLocalizedString("Rewind", comment: "Title for button allowing user to rewind their Jetpack site"),
+        rewindButton.setTitle(NSLocalizedString("Restore", comment: "Title for button allowing user to restore their Jetpack site"),
+                                                for: .normal)
+        backupButton.setTitle(NSLocalizedString("Download backup", comment: "Title for button allowing user to backup their Jetpack site"),
                                                 for: .normal)
 
-        let dateFormatter = ActivityDateFormatting.longDateFormatterWithoutTime(for: site)
+        let dateFormatter = ActivityDateFormatting.longDateFormatter(for: site, withTime: false)
         dateLabel.text = dateFormatter.string(from: activity.published)
 
         let timeFormatter = DateFormatter()
@@ -164,6 +242,22 @@ class ActivityDetailViewController: UIViewController {
         }
     }
 
+    private func hideRestoreIfNeeded() {
+        guard let isRestoreActive = rewindStatus?.isActive() else {
+            return
+        }
+
+        rewindStackView.isHidden = !isRestoreActive
+    }
+
+    private func showWarningIfNeeded() {
+        guard let isMultiSite = rewindStatus?.isMultisite() else {
+            return
+        }
+
+        warningButton.isHidden = !isMultiSite
+    }
+
     func setupRouter() {
         guard let activity = formattableActivity else {
             router = nil
@@ -187,8 +281,23 @@ class ActivityDetailViewController: UIViewController {
         }
     }
 
+    private func presentedFrom() -> String {
+        if presenter is JetpackActivityLogViewController {
+            return "activity_log"
+        } else if presenter is BackupListViewController {
+            return "backup"
+        } else if presenter is DashboardActivityLogCardCell {
+            return "dashboard"
+        } else {
+            return "unknown"
+        }
+    }
+
     private enum Constants {
         static let gridiconSize: CGSize = CGSize(width: 24, height: 24)
+        static let supportUrl = "https://jetpack.com/support/backup/"
+        // the distance ought to be 30, and the stackView spacing is 16, thus the top inset is 14.
+        static let jetpackBadgeTopInset: CGFloat = 14
     }
 }
 

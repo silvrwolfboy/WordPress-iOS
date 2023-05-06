@@ -1,7 +1,7 @@
 import Foundation
 import AutomatticTracks
 
-@objc protocol PostActionSheetDelegate {
+protocol PostActionSheetDelegate: AnyObject {
     func showActionSheet(_ postCardStatusViewModel: PostCardStatusViewModel, from view: UIView)
 }
 
@@ -43,6 +43,10 @@ class PostActionSheet {
                     actionSheetController.addDefaultActionWithTitle(Titles.stats) { [weak self] _ in
                         self?.interactivePostViewDelegate?.stats(for: post)
                     }
+                case .duplicate:
+                    actionSheetController.addDefaultActionWithTitle(Titles.duplicate) { [weak self] _ in
+                        self?.interactivePostViewDelegate?.duplicate(post)
+                    }
                 case .publish:
                     actionSheetController.addDefaultActionWithTitle(Titles.publish) { [weak self] _ in
                         self?.interactivePostViewDelegate?.publish(post)
@@ -68,8 +72,21 @@ class PostActionSheet {
                     actionSheetController.addDefaultActionWithTitle(Titles.edit) { [weak self] _ in
                         self?.interactivePostViewDelegate?.edit(post)
                     }
+                case .share:
+                    actionSheetController.addDefaultActionWithTitle(Titles.share) { [weak self] _ in
+                        self?.interactivePostViewDelegate?.share(post, fromView: view)
+                    }
+                case .blaze:
+                    BlazeEventsTracker.trackEntryPointDisplayed(for: .postsList)
+                    actionSheetController.addDefaultActionWithTitle(Titles.blaze) { [weak self] _ in
+                        self?.interactivePostViewDelegate?.blaze(post)
+                    }
                 case .more:
-                    CrashLogging.logMessage("Cannot handle unexpected button for post action sheet: \(button). This is a configuration error.", level: .error)
+                    WordPressAppDelegate.crashLogging?.logMessage("Cannot handle unexpected button for post action sheet: \(button). This is a configuration error.", level: .error)
+                case .copyLink:
+                    actionSheetController.addDefaultActionWithTitle(Titles.copyLink) { [weak self] _ in
+                        self?.interactivePostViewDelegate?.copyLink(post)
+                    }
                 }
         }
 
@@ -86,6 +103,7 @@ class PostActionSheet {
         static let cancel = NSLocalizedString("Cancel", comment: "Dismiss the post action sheet")
         static let cancelAutoUpload = NSLocalizedString("Cancel Upload", comment: "Label for the Post List option that cancels automatic uploading of a post.")
         static let stats = NSLocalizedString("Stats", comment: "Label for post stats option. Tapping displays statistics for a post.")
+        static let duplicate = NSLocalizedString("Duplicate", comment: "Label for post duplicate option. Tapping creates a copy of the post.")
         static let publish = NSLocalizedString("Publish Now", comment: "Label for an option that moves a publishes a post immediately")
         static let draft = NSLocalizedString("Move to Draft", comment: "Label for an option that moves a post to the draft folder")
         static let delete = NSLocalizedString("Delete Permanently", comment: "Label for the delete post option. Tapping permanently deletes a post.")
@@ -93,5 +111,8 @@ class PostActionSheet {
         static let view = NSLocalizedString("View", comment: "Label for the view post button. Tapping displays the post as it appears on the web.")
         static let retry = NSLocalizedString("Retry", comment: "Retry uploading the post.")
         static let edit = NSLocalizedString("Edit", comment: "Edit the post.")
+        static let share = NSLocalizedString("Share", comment: "Share the post.")
+        static let blaze = NSLocalizedString("posts.blaze.actionTitle", value: "Promote with Blaze", comment: "Promote the post with Blaze.")
+        static let copyLink = NSLocalizedString("Copy Link", comment: "Copy the post url and paste anywhere in phone")
     }
 }

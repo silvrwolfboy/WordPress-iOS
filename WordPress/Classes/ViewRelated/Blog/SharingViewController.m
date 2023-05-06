@@ -19,18 +19,23 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 
 @property (nonatomic, strong, readonly) Blog *blog;
 @property (nonatomic, strong) NSArray *publicizeServices;
+@property (nonatomic, weak) id delegate;
+@property (nonatomic) PublicizeServicesState *publicizeServicesState;
+@property (nonatomic) JetpackModuleHelper *jetpackModuleHelper;
 
 @end
 
 @implementation SharingViewController
 
-- (instancetype)initWithBlog:(Blog *)blog
+- (instancetype)initWithBlog:(Blog *)blog delegate:(id)delegate
 {
     NSParameterAssert([blog isKindOfClass:[Blog class]]);
-    self = [self initWithStyle:UITableViewStyleGrouped];
+    self = [self initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
         _blog = blog;
         _publicizeServices = [NSMutableArray new];
+        _delegate = delegate;
+        _publicizeServicesState = [PublicizeServicesState new];
     }
     return self;
 }
@@ -40,9 +45,29 @@ static NSString *const CellIdentifier = @"CellIdentifier";
     [super viewDidLoad];
 
     self.navigationItem.title = NSLocalizedString(@"Sharing", @"Title for blog detail sharing screen.");
+    
+    self.extendedLayoutIncludesOpaqueBars = YES;
+    
+    if (self.isModal) {
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                                                                                               target:self
+                                                                                               action:@selector(doneButtonTapped)];
+    }
 
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
-    [self syncServices];
+    [self.publicizeServicesState addInitialConnections:[self allConnections]];
+
+    self.navigationController.presentationController.delegate = self;
+
+    if ([self.blog supportsPublicize]) {
+        [self syncServices];
+    } else {
+        self.jetpackModuleHelper = [[JetpackModuleHelper alloc] initWithViewController:self moduleName:@"publicize" blog:self.blog];
+
+        [self.jetpackModuleHelper showWithTitle:NSLocalizedString(@"Enable Publicize", "Text shown when the site doesn't have the Publicize module enabled.") subtitle:NSLocalizedString(@"In order to share your published posts to your social media you need to enable the Publicize module.", "Title of button to enable publicize.")];
+
+        self.tableView.dataSource = NULL;
+    }
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -58,14 +83,23 @@ static NSString *const CellIdentifier = @"CellIdentifier";
     [ReachabilityUtils dismissNoInternetConnectionNotice];
 }
 
+-(void)presentationControllerDidDismiss:(UIPresentationController *)presentationController
+{
+    [self notifyDelegatePublicizeServicesChangedIfNeeded];
+}
+
 - (void)refreshPublicizers
 {
-    SharingService *sharingService = [[SharingService alloc] initWithManagedObjectContext:[self managedObjectContext]];
-    self.publicizeServices = [sharingService allPublicizeServices];
+    self.publicizeServices = [PublicizeService allPublicizeServicesInContext:[self managedObjectContext] error:nil];
 
     [self.tableView reloadData];
 }
 
+- (void)doneButtonTapped
+{
+    [self notifyDelegatePublicizeServicesChangedIfNeeded];
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
 
 #pragma mark - UITableView Delegate methods
 
@@ -82,7 +116,7 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 {
     switch (section) {
         case SharingPublicizeServices:
-            return NSLocalizedString(@"Connections", @"Section title for Publicize services in Sharing screen");
+            return NSLocalizedString(@"Jetpack Social Connections", @"Section title for Publicize services in Sharing screen");
         case SharingButtons:
             return NSLocalizedString(@"Sharing Buttons", @"Section title for the sharing buttons section in the Sharing screen");
         default:
@@ -137,7 +171,7 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 
     [WPStyleGuide configureTableViewCell:cell];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    if (indexPath == [NSIndexPath indexPathForRow:0 inSection:0] && [[QuickStartTourGuide find] isCurrentElement:QuickStartTourElementConnections]) {
+    if (indexPath == [NSIndexPath indexPathForRow:0 inSection:0] && [[QuickStartTourGuide shared] isCurrentElement:QuickStartTourElementConnections]) {
         cell.accessoryView = [QuickStartSpotlightView new];
     } else {
         cell.accessoryView = nil;
@@ -205,7 +239,7 @@ static NSString *const CellIdentifier = @"CellIdentifier";
         controller = [[SharingConnectionsViewController alloc] initWithBlog:self.blog publicizeService:publicizer];
         [WPAppAnalytics track:WPAnalyticsStatSharingOpenedPublicize withBlog:self.blog];
 
-        [[QuickStartTourGuide find] visited:QuickStartTourElementConnections];
+        [[QuickStartTourGuide shared] visited:QuickStartTourElementConnections];
     } else {
         controller = [[SharingButtonsViewController alloc] initWithBlog:self.blog];
         [WPAppAnalytics track:WPAnalyticsStatSharingOpenedSharingButtonSettings withBlog:self.blog];
@@ -214,6 +248,22 @@ static NSString *const CellIdentifier = @"CellIdentifier";
     [self.navigationController pushViewController:controller animated:YES];
 }
 
+- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section
+{
+    if (section == SharingButtons && [SharingViewController jetpackBrandingVisibile]) {
+        return [self makeJetpackBadge];
+    }
+
+    return nil;
+}
+
+#pragma mark - JetpackModuleHelper
+
+- (void)jetpackModuleEnabled
+{
+    self.tableView.dataSource = self;
+    [self syncServices];
+}
 
 #pragma mark - Publicizer management
 
@@ -227,6 +277,25 @@ static NSString *const CellIdentifier = @"CellIdentifier";
         }
     }
     return [NSArray arrayWithArray:connections];
+}
+
+- (NSArray *)allConnections
+{
+    NSMutableArray *allConnections = [NSMutableArray new];
+    for (PublicizeService *service in self.publicizeServices) {
+        NSArray *connections = [self connectionsForService:service];
+        if (connections.count > 0) {
+            [allConnections addObjectsFromArray:connections];
+        }
+    }
+    return allConnections;
+}
+
+-(void)notifyDelegatePublicizeServicesChangedIfNeeded
+{
+    if ([self.publicizeServicesState hasAddedNewConnectionTo:[self allConnections]]) {
+        [self.delegate didChangePublicizeServices];
+    }
 }
 
 - (NSManagedObjectContext *)managedObjectContext
@@ -254,15 +323,15 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 
 - (void)syncPublicizeServices
 {
-    SharingService *sharingService = [[SharingService alloc] initWithManagedObjectContext:[self managedObjectContext]];
+    SharingService *sharingService = [[SharingService alloc] initWithContextManager:[ContextManager sharedInstance]];
     __weak __typeof__(self) weakSelf = self;
     [sharingService syncPublicizeServicesForBlog:self.blog success:^{
         [weakSelf syncConnections];
-    } failure:^(NSError *error) {
+    } failure:^(NSError * __unused error) {
         if (!ReachabilityUtils.isInternetReachable) {
             [weakSelf showConnectionError];
         } else {
-            [SVProgressHUD showDismissibleErrorWithStatus:NSLocalizedString(@"Publicize service synchronization failed", @"Message to show when Publicize service synchronization failed")];
+            [SVProgressHUD showDismissibleErrorWithStatus:NSLocalizedString(@"Jetpack Social service synchronization failed", @"Message to show when Publicize service synchronization failed")];
             [weakSelf refreshPublicizers];
         }
     }];
@@ -270,15 +339,15 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 
 - (void)syncConnections
 {
-    SharingService *sharingService = [[SharingService alloc] initWithManagedObjectContext:[self managedObjectContext]];
+    SharingSyncService *sharingService = [[SharingSyncService alloc] initWithCoreDataStack:[ContextManager sharedInstance]];
     __weak __typeof__(self) weakSelf = self;
     [sharingService syncPublicizeConnectionsForBlog:self.blog success:^{
         [weakSelf refreshPublicizers];
-    } failure:^(NSError *error) {
+    } failure:^(NSError * __unused error) {
         if (!ReachabilityUtils.isInternetReachable) {
             [weakSelf showConnectionError];
         } else {
-            [SVProgressHUD showDismissibleErrorWithStatus:NSLocalizedString(@"Publicize connection synchronization failed", @"Message to show when Publicize connection synchronization failed")];
+            [SVProgressHUD showDismissibleErrorWithStatus:NSLocalizedString(@"Jetpack Social connection synchronization failed", @"Message to show when Publicize connection synchronization failed")];
             [weakSelf refreshPublicizers];
         }
     }];
@@ -288,11 +357,12 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 {
     // Sync sharing buttons if they have never been synced. Otherwise, the
     // management vc can worry about fetching the latest sharing buttons.
-    SharingService *sharingService = [[SharingService alloc] initWithManagedObjectContext:[self managedObjectContext]];
-    NSArray *buttons = [sharingService allSharingButtonsForBlog:self.blog];
+    NSArray *buttons = [SharingButton allSharingButtonsForBlog:self.blog inContext:[self managedObjectContext] error:nil];
     if ([buttons count] > 0) {
         return;
     }
+
+    SharingService *sharingService = [[SharingService alloc] initWithContextManager:[ContextManager sharedInstance]];
     [sharingService syncSharingButtonsForBlog:self.blog success:nil failure:^(NSError *error) {
         DDLogError([error description]);
     }];

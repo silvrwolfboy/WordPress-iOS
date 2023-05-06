@@ -1,4 +1,5 @@
 import UIKit
+import WordPressAuthenticator
 
 extension NSNotification.Name {
     static let createSite = NSNotification.Name(rawValue: "PSICreateSite")
@@ -12,11 +13,6 @@ extension NSNotification.Name {
 
 private struct Constants {
     // I18N Strings
-    static let welcomeTitleText = NSLocalizedString(
-        "Welcome to WordPress",
-        comment: "Post Signup Interstitial Title Text"
-    )
-
     static let subTitleText = NSLocalizedString(
         "Whatever you want to create or share, we'll help you do it right here.",
         comment: "Post Signup Interstitial Subtitle Text"
@@ -44,10 +40,21 @@ class PostSignUpInterstitialViewController: UIViewController {
     @IBOutlet weak var createSiteButton: UIButton!
     @IBOutlet weak var addSelfHostedButton: UIButton!
     @IBOutlet weak var cancelButton: UIButton!
+    @IBOutlet weak var imageView: UIImageView!
+
+    enum DismissAction {
+        case none
+        case createSite
+        case addSelfHosted
+    }
 
     /// Closure to be executed upon dismissal.
     ///
-    var onDismiss: (() -> Void)?
+    var dismiss: ((_ action: DismissAction) -> Void)?
+
+    /// Analytics tracker
+    ///
+    private let tracker = AuthenticatorAnalyticsTracker.shared
 
     // MARK: - View Methods
     override func viewDidLoad() {
@@ -55,10 +62,12 @@ class PostSignUpInterstitialViewController: UIViewController {
 
         view.backgroundColor = .listBackground
 
-        configureI18N()
+        // Update the banner image for Jetpack
+        if AppConfiguration.isJetpack, let image = UIImage(named: "wp-illustration-construct-site-jetpack") {
+            imageView.image = image
+        }
 
-        let coordinator = PostSignUpInterstitialCoordinator()
-        coordinator.markAsSeen()
+        configureI18N()
 
         WPAnalytics.track(.welcomeNoSitesInterstitialShown)
     }
@@ -74,35 +83,37 @@ class PostSignUpInterstitialViewController: UIViewController {
 
     // MARK: - IBAction's
     @IBAction func createSite(_ sender: Any) {
-        onDismiss?()
-        navigationController?.dismiss(animated: false) {
-            NotificationCenter.default.post(name: .createSite, object: nil)
-        }
+        tracker.track(click: .createNewSite, ifTrackingNotEnabled: {
+            WPAnalytics.track(.welcomeNoSitesInterstitialButtonTapped, withProperties: ["button": "create_new_site"])
+        })
 
-        WPAnalytics.track(.welcomeNoSitesInterstitialButtonTapped, withProperties: ["button": "create_new_site"])
+        RootViewCoordinator.sharedPresenter.willDisplayPostSignupFlow()
+        dismiss?(.createSite)
+
     }
 
     @IBAction func addSelfHosted(_ sender: Any) {
-        onDismiss?()
-        navigationController?.dismiss(animated: false) {
-            NotificationCenter.default.post(name: .addSelfHosted, object: nil)
-        }
+        tracker.track(click: .addSelfHostedSite, ifTrackingNotEnabled: {
+            WPAnalytics.track(.welcomeNoSitesInterstitialButtonTapped, withProperties: ["button": "add_self_hosted_site"])
+        })
 
-        WPAnalytics.track(.welcomeNoSitesInterstitialButtonTapped, withProperties: ["button": "add_self_hosted_site"])
+        RootViewCoordinator.sharedPresenter.willDisplayPostSignupFlow()
+        dismiss?(.addSelfHosted)
     }
 
     @IBAction func cancel(_ sender: Any) {
-        onDismiss?()
+        dismiss?(.none)
 
-        WPTabBarController.sharedInstance().showReaderTab()
-        navigationController?.dismiss(animated: true, completion: nil)
+        RootViewCoordinator.sharedPresenter.showReaderTab()
 
-        WPAnalytics.track(.welcomeNoSitesInterstitialDismissed)
+        tracker.track(click: .dismiss, ifTrackingNotEnabled: {
+            WPAnalytics.track(.welcomeNoSitesInterstitialDismissed)
+        })
     }
 
     // MARK: - Private
     private func configureI18N() {
-        welcomeLabel.text = Constants.welcomeTitleText
+        welcomeLabel.text = AppConstants.PostSignUpInterstitial.welcomeTitleText
         subTitleLabel.text = Constants.subTitleText
         createSiteButton.setTitle(Constants.createSiteButtonTitleText, for: .normal)
         addSelfHostedButton.setTitle(Constants.addSelfHostedButtonTitleText, for: .normal)
@@ -111,18 +122,14 @@ class PostSignUpInterstitialViewController: UIViewController {
 
     /// Determines whether or not the PSI should be displayed for the logged in user
     @objc class func shouldDisplay() -> Bool {
-        let numberOfBlogs = self.numberOfBlogs()
+        guard AppConfiguration.allowSiteCreation else {
+            return false
+        }
 
-        let coordinator = PostSignUpInterstitialCoordinator()
-        return coordinator.shouldDisplay(numberOfBlogs: numberOfBlogs)
+        return self.numberOfBlogs() == 0
     }
 
     private class func numberOfBlogs() -> Int {
-        let context = ContextManager.sharedInstance().mainContext
-        let blogService = BlogService(managedObjectContext: context)
-
-        let blogCount = blogService.blogCountForAllAccounts()
-
-        return blogCount
+        return Blog.count(in: ContextManager.sharedInstance().mainContext)
     }
 }

@@ -2,14 +2,40 @@ import Foundation
 import Gridicons
 import UIKit
 import WebKit
+import WordPressShared
 
-class WebKitViewController: UIViewController {
+protocol WebKitAuthenticatable {
+    var authenticator: RequestAuthenticator? { get }
+    func authenticatedRequest(for url: URL, on webView: WKWebView, completion: @escaping (URLRequest) -> Void)
+}
+
+extension WebKitAuthenticatable {
+    func authenticatedRequest(for url: URL, on webView: WKWebView, completion: @escaping (URLRequest) -> Void) {
+        let cookieJar = webView.configuration.websiteDataStore.httpCookieStore
+        authenticatedRequest(for: url, with: cookieJar, completion: completion)
+    }
+
+    func authenticatedRequest(for url: URL, with cookieJar: CookieJar, completion: @escaping (URLRequest) -> Void) {
+        guard let authenticator = authenticator else {
+            return completion(URLRequest(url: url))
+        }
+
+        DispatchQueue.main.async {
+            authenticator.request(url: url, cookieJar: cookieJar) { (request) in
+                completion(request)
+            }
+        }
+    }
+}
+
+class WebKitViewController: UIViewController, WebKitAuthenticatable {
     @objc let webView: WKWebView
     @objc let progressView = WebProgressView()
     @objc let titleView = NavigationTitleView()
+    let analyticsSource: String?
 
     @objc lazy var backButton: UIBarButtonItem = {
-        let button = UIBarButtonItem(image: Gridicon.iconOfType(.chevronLeft).imageFlippedForRightToLeftLayoutDirection(),
+        let button = UIBarButtonItem(image: UIImage.gridicon(.chevronLeft).imageFlippedForRightToLeftLayoutDirection(),
                                style: .plain,
                                target: self,
                                action: #selector(goBack))
@@ -17,7 +43,7 @@ class WebKitViewController: UIViewController {
         return button
     }()
     @objc lazy var forwardButton: UIBarButtonItem = {
-        let button = UIBarButtonItem(image: Gridicon.iconOfType(.chevronRight),
+        let button = UIBarButtonItem(image: .gridicon(.chevronRight),
                                style: .plain,
                                target: self,
                                action: #selector(goForward))
@@ -25,7 +51,7 @@ class WebKitViewController: UIViewController {
         return button
     }()
     @objc lazy var shareButton: UIBarButtonItem = {
-        let button = UIBarButtonItem(image: Gridicon.iconOfType(.shareIOS),
+        let button = UIBarButtonItem(image: .gridicon(.shareiOS),
                                style: .plain,
                                target: self,
                                action: #selector(share))
@@ -33,7 +59,7 @@ class WebKitViewController: UIViewController {
         return button
     }()
     @objc lazy var safariButton: UIBarButtonItem = {
-        let button = UIBarButtonItem(image: Gridicon.iconOfType(.globe),
+        let button = UIBarButtonItem(image: .gridicon(.globe),
                                style: .plain,
                                target: self,
                                action: #selector(openInSafari))
@@ -42,24 +68,23 @@ class WebKitViewController: UIViewController {
         return button
     }()
     @objc lazy var refreshButton: UIBarButtonItem = {
-        let button = UIBarButtonItem(image: Gridicon.iconOfType(.refresh), style: .plain, target: self, action: #selector(WebKitViewController.refresh))
+        let button = UIBarButtonItem(image: .gridicon(.refresh), style: .plain, target: self, action: #selector(WebKitViewController.refresh))
         button.title = NSLocalizedString("Refresh", comment: "Button label to refres a web page")
         return button
     }()
     @objc lazy var closeButton: UIBarButtonItem = {
-        let button = UIBarButtonItem(image: Gridicon.iconOfType(.cross), style: .plain, target: self, action: #selector(WebKitViewController.close))
-        button.title = NSLocalizedString("Dismiss", comment: "Dismiss a view. Verb")
+        let button = UIBarButtonItem(image: .gridicon(.cross), style: .plain, target: self, action: #selector(WebKitViewController.close))
+        button.title = NSLocalizedString("webKit.button.dismiss", value: "Dismiss", comment: "Verb. Dismiss the web view screen.")
         return button
     }()
 
     @objc var customOptionsButton: UIBarButtonItem?
 
     @objc let url: URL?
-    @objc let authenticator: WebViewAuthenticator?
+    @objc let authenticator: RequestAuthenticator?
     @objc let navigationDelegate: WebNavigationDelegate?
     @objc var secureInteraction = false
     @objc var addsWPComReferrer = false
-    @objc var addsHideMasterbarParameters = true
     @objc var customTitle: String?
     private let opensNewInSafari: Bool
     let linkBehavior: LinkBehavior
@@ -67,40 +92,60 @@ class WebKitViewController: UIViewController {
     private var reachabilityObserver: Any?
     private var tapLocation = CGPoint(x: 0.0, y: 0.0)
     private var widthConstraint: NSLayoutConstraint?
+    private var stackViewBottomAnchor: NSLayoutConstraint?
+    private var onClose: (() -> Void)?
+
+    private var barButtonTintColor: UIColor {
+        .listIcon
+    }
+
+    private var navBarTitleColor: UIColor {
+        .text
+    }
+
 
     private struct WebViewErrors {
         static let frameLoadInterrupted = 102
     }
 
+    /// Precautionary variable that's in place to make sure the web view doesn't run into an endless loop of reloads if it encounters an error.
+    private var hasAttemptedAuthRecovery = false
+
     @objc init(configuration: WebViewControllerConfiguration) {
-        webView = WKWebView()
+        let config = WKWebViewConfiguration()
+        // The default on iPad is true. We want the iPhone to be true as well.
+        config.allowsInlineMediaPlayback = true
+
+        webView = WKWebView(frame: .zero, configuration: config)
         url = configuration.url
         customOptionsButton = configuration.optionsButton
         secureInteraction = configuration.secureInteraction
         addsWPComReferrer = configuration.addsWPComReferrer
-        addsHideMasterbarParameters = configuration.addsHideMasterbarParameters
         customTitle = configuration.customTitle
         authenticator = configuration.authenticator
         navigationDelegate = configuration.navigationDelegate
         linkBehavior = configuration.linkBehavior
         opensNewInSafari = configuration.opensNewInSafari
+        onClose = configuration.onClose
+        analyticsSource = configuration.analyticsSource
+
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
         startObservingWebView()
     }
 
-    fileprivate init(url: URL, parent: WebKitViewController) {
-        webView = WKWebView(frame: .zero, configuration: parent.webView.configuration)
+    fileprivate init(url: URL, parent: WebKitViewController, configuration: WKWebViewConfiguration, source: String? = nil) {
+        webView = WKWebView(frame: .zero, configuration: configuration)
         self.url = url
         customOptionsButton = parent.customOptionsButton
         secureInteraction = parent.secureInteraction
         addsWPComReferrer = parent.addsWPComReferrer
-        addsHideMasterbarParameters = parent.addsHideMasterbarParameters
         customTitle = parent.customTitle
         authenticator = parent.authenticator
         navigationDelegate = parent.navigationDelegate
         linkBehavior = parent.linkBehavior
         opensNewInSafari = parent.opensNewInSafari
+        analyticsSource = source
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
         startObservingWebView()
@@ -147,7 +192,16 @@ class WebKitViewController: UIViewController {
 
         NSLayoutConstraint.activate(edgeConstraints)
 
-        view.pinSubviewAtCenter(stackView)
+        // we are pinning the top and bottom of the stack view to the safe area to prevent unintentionally hidden content/overlaps (ie cookie acceptance popup) then center the horizontal constraints vertically
+        let safeArea = self.view.safeAreaLayoutGuide
+
+        stackView.centerXAnchor.constraint(equalTo: view.centerXAnchor).isActive = true
+        stackView.topAnchor.constraint(equalTo: safeArea.topAnchor).isActive = true
+
+        // this constraint saved as a varible so it can be deactivated when the toolbar is hidden, to prevent unintended pinning to the safe area
+        let stackViewBottom = stackView.bottomAnchor.constraint(equalTo: safeArea.bottomAnchor)
+        stackViewBottomAnchor = stackViewBottom
+        NSLayoutConstraint.activate([stackViewBottom])
 
         let stackWidthConstraint = stackView.widthAnchor.constraint(equalToConstant: 0)
         stackWidthConstraint.priority = UILayoutPriority.defaultLow
@@ -162,36 +216,28 @@ class WebKitViewController: UIViewController {
         webView.uiDelegate = self
 
         loadWebViewRequest()
+
+        track(.webKitViewDisplayed)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         stopWaitingForConnectionRestored()
         ReachabilityUtils.dismissNoInternetConnectionNotice()
+
+        track(.webKitViewDismissed)
     }
 
     @objc func loadWebViewRequest() {
         if ReachabilityUtils.alertIsShowing() {
-            self.dismiss(animated: false)
+            dismiss(animated: false)
         }
-
-        guard let authenticator = authenticator else {
-            if let url = url {
-                load(request: URLRequest(url: url))
-            }
+        guard let url = url else {
             return
         }
 
-        DispatchQueue.main.async { [weak self] in
-            guard let strongSelf = self else {
-                return
-            }
-
-            if let url = strongSelf.url {
-                authenticator.request(url: url, cookieJar: strongSelf.webView.configuration.websiteDataStore.httpCookieStore) { [weak self] (request) in
-                    self?.load(request: request)
-                }
-            }
+        authenticatedRequest(for: url, on: webView) { [weak self] (request) in
+            self?.load(request: request)
         }
     }
 
@@ -199,12 +245,6 @@ class WebKitViewController: UIViewController {
         var request = request
         if addsWPComReferrer {
             request.setValue(WPComReferrerURL, forHTTPHeaderField: "Referer")
-        }
-
-        if addsHideMasterbarParameters,
-            let host = request.url?.host,
-            (host.contains(WPComDomain) || host.contains(AutomatticDomain)) {
-            request.url = request.url?.appendingHideMasterbarParameters()
         }
 
         webView.load(request)
@@ -225,7 +265,6 @@ class WebKitViewController: UIViewController {
 
         setupCloseButton()
         styleNavBar()
-        styleNavBarButtons()
     }
 
     private func setupRefreshButton() {
@@ -242,11 +281,8 @@ class WebKitViewController: UIViewController {
 
     private func setupNavBarTitleView() {
         titleView.titleLabel.text = NSLocalizedString("Loading...", comment: "Loading. Verb")
-        if #available(iOS 13.0, *), navigationController is LightNavigationController == false {
-            titleView.titleLabel.textColor = UIColor(light: .white, dark: .neutral(.shade70))
-        } else {
-            titleView.titleLabel.textColor = .neutral(.shade70)
-        }
+
+        titleView.titleLabel.textColor = navBarTitleColor
         titleView.subtitleLabel.textColor = .neutral(.shade30)
 
         if let title = customTitle {
@@ -261,16 +297,14 @@ class WebKitViewController: UIViewController {
             return
         }
         navigationBar.barStyle = .default
-        navigationBar.titleTextAttributes = [.foregroundColor: UIColor.neutral(.shade70)]
+
+        // Remove serif title bar formatting
+        navigationBar.standardAppearance.titleTextAttributes = [:]
+
         navigationBar.shadowImage = UIImage(color: WPStyleGuide.webViewModalNavigationBarShadow())
         navigationBar.setBackgroundImage(UIImage(color: WPStyleGuide.webViewModalNavigationBarBackground()), for: .default)
 
         fixBarButtonsColorForBoldText(on: navigationBar)
-    }
-
-    private func styleNavBarButtons() {
-        navigationItem.leftBarButtonItems?.forEach(styleBarButton)
-        navigationItem.rightBarButtonItems?.forEach(styleBarButton)
     }
 
     // MARK: ToolBar setup
@@ -279,6 +313,8 @@ class WebKitViewController: UIViewController {
         navigationController?.isToolbarHidden = secureInteraction
 
         guard !secureInteraction else {
+            // if not a secure interaction/view, no toolbar is displayed, so deactivate constraint pinning stack view to safe area
+            stackViewBottomAnchor?.isActive = false
             return
         }
 
@@ -307,7 +343,17 @@ class WebKitViewController: UIViewController {
         guard let toolBar = navigationController?.toolbar else {
             return
         }
-        toolBar.barTintColor = UIColor(light: .white, dark: .appBar)
+
+        let appearance = UIToolbarAppearance()
+        appearance.configureWithDefaultBackground()
+        appearance.backgroundColor = UIColor(light: .white, dark: .appBarBackground)
+
+        toolBar.standardAppearance = appearance
+
+        if #available(iOS 15.0, *) {
+            toolBar.scrollEdgeAppearance = appearance
+        }
+
         fixBarButtonsColorForBoldText(on: toolBar)
     }
 
@@ -317,9 +363,19 @@ class WebKitViewController: UIViewController {
 
     /// Sets the width of the web preview
     /// - Parameter width: The width value to set the webView to
-    func setWidth(_ width: CGFloat?) {
+    /// - Parameter viewWidth: The view width the webView must fit within, used to manage view transitions, e.g. orientation change
+    func setWidth(_ width: CGFloat?, viewWidth: CGFloat? = nil) {
         if let width = width {
-            widthConstraint?.constant = width
+            let horizontalViewBound: CGFloat
+            if let viewWidth = viewWidth {
+                horizontalViewBound = viewWidth
+            } else if let superViewWidth = view.superview?.frame.width {
+                horizontalViewBound = superViewWidth
+            } else {
+                horizontalViewBound = width
+            }
+
+            widthConstraint?.constant = min(width, horizontalViewBound)
             widthConstraint?.priority = UILayoutPriority.defaultHigh
         } else {
             widthConstraint?.priority = UILayoutPriority.defaultLow
@@ -335,11 +391,7 @@ class WebKitViewController: UIViewController {
     }
 
     private func styleBarButton(_ button: UIBarButtonItem) {
-        if #available(iOS 13.0, *), navigationController is LightNavigationController == false {
-            button.tintColor = UIColor(light: .white, dark: .neutral(.shade70))
-        } else {
-            button.tintColor = .listIcon
-        }
+        button.tintColor = barButtonTintColor
     }
 
     private func styleToolBarButton(_ button: UIBarButtonItem) {
@@ -370,9 +422,8 @@ class WebKitViewController: UIViewController {
     }
 
     // MARK: User Actions
-
     @objc func close() {
-        dismiss(animated: true)
+        dismiss(animated: true, completion: onClose)
     }
 
     @objc func share() {
@@ -390,19 +441,22 @@ class WebKitViewController: UIViewController {
             }
         }
         present(activityViewController, animated: true)
-
+        track(.webKitViewShareTapped)
     }
 
     @objc func refresh() {
         webView.reload()
+        track(.webKitViewReloadTapped)
     }
 
     @objc func goBack() {
         webView.goBack()
+        track(.webKitViewNavigatedBack)
     }
 
     @objc func goForward() {
         webView.goForward()
+        track(.webKitViewNavigatedForward)
     }
 
     @objc func openInSafari() {
@@ -410,6 +464,7 @@ class WebKitViewController: UIViewController {
             return
         }
         UIApplication.shared.open(url)
+        track(.webKitViewOpenInSafariTapped)
     }
 
     ///location is used to present a document menu in tap location on iOS 13
@@ -455,15 +510,18 @@ class WebKitViewController: UIViewController {
         navigationItem.titleView?.accessibilityValue = titleView.titleLabel.text
         navigationItem.titleView?.accessibilityTraits = .updatesFrequently
     }
+
+    private func track(_ event: WPAnalyticsEvent) {
+        let properties: [AnyHashable: Any] = [
+            "source": analyticsSource ?? "unknown"
+        ]
+
+        WPAnalytics.track(event, properties: properties)
+    }
 }
 
 extension WebKitViewController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if let request = authenticator?.interceptRedirect(request: navigationAction.request) {
-            decisionHandler(.cancel)
-            load(request: request)
-            return
-        }
 
         if let delegate = navigationDelegate {
             let policy = delegate.shouldNavigate(request: navigationAction.request)
@@ -480,9 +538,58 @@ extension WebKitViewController: WKNavigationDelegate {
             return
         }
 
+        // Check for link protocols such as `tel:` and set the correct behavior
+        if let url = navigationAction.request.url, let scheme = url.scheme {
+            let linkProtocols = ["tel", "sms", "mailto"]
+            if linkProtocols.contains(scheme) && UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                decisionHandler(.cancel)
+                return
+            }
+        }
+
+        /// Force cross-site navigations to be opened in the web view when the counterpart app is installed.
+        ///
+        /// The default system behavior (through `decisionHandler`) for cross-site navigation is to open the
+        /// destination URL in Safari. When both WordPress & Jetpack are installed, this caused the counterpart
+        /// app to catch the navigation intent and process the URL in the app instead.
+        ///
+        /// We can remove this workaround when the universal link routes are removed from WordPress.com.
+        if MigrationAppDetection.isCounterpartAppInstalled,
+           let originHost = webView.url?.host?.lowercased(),
+           let destinationHost = navigationAction.request.url?.host?.lowercased(),
+           navigationAction.navigationType == .linkActivated,
+           destinationHost.hasSuffix("wordpress.com"),
+           originHost != destinationHost {
+            load(request: navigationAction.request)
+            decisionHandler(.cancel)
+            return
+        }
+
         let policy = linkBehavior.handle(navigationAction: navigationAction, for: webView)
 
         decisionHandler(policy)
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        guard navigationResponse.isForMainFrame, let authenticator = authenticator, !hasAttemptedAuthRecovery else {
+            decisionHandler(.allow)
+            return
+        }
+
+        let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+        authenticator.decideActionFor(response: navigationResponse.response, cookieJar: cookieStore) { [unowned self] action in
+            switch action {
+            case .reload:
+                decisionHandler(.cancel)
+
+                /// We've cleared the stored cookies so let's try again.
+                self.hasAttemptedAuthRecovery = true
+                self.loadWebViewRequest()
+            case .allow:
+                decisionHandler(.allow)
+            }
+        }
     }
 }
 
@@ -494,9 +601,10 @@ extension WebKitViewController: WKUIDelegate {
             if opensNewInSafari {
                 UIApplication.shared.open(url, options: [:], completionHandler: nil)
             } else {
-                let controller = WebKitViewController(url: url, parent: self)
+                let controller = WebKitViewController(url: url, parent: self, configuration: configuration, source: analyticsSource)
                 let navController = UINavigationController(rootViewController: controller)
                 present(navController, animated: true)
+                return controller.webView
             }
         }
         return nil
@@ -519,7 +627,7 @@ extension WebKitViewController: WKUIDelegate {
             ReachabilityUtils.showNoInternetConnectionNotice()
             reloadWhenConnectionRestored()
         } else {
-            WPError.showAlert(withTitle: NSLocalizedString("Error", comment: "Generic error alert title"), message: error.localizedDescription)
+            DDLogError("WebView \(webView) didFailProvisionalNavigation: \(error.localizedDescription)")
         }
     }
 }

@@ -8,11 +8,14 @@ final class ReaderLikeAction {
             ReaderHelpers.bumpPageViewForPost(post)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
-        let service = ReaderPostService(managedObjectContext: context)
-        service.toggleLiked(for: post, success: nil, failure: { (error: Error?) in
+        let service = ReaderPostService(coreDataStack: ContextManager.shared)
+        service.toggleLiked(for: post, success: {
+            completion?()
+        }, failure: { (error: Error?) in
             if let anError = error {
                 DDLogError("Error (un)liking post: \(anError.localizedDescription)")
             }
+            completion?()
         })
     }
 }

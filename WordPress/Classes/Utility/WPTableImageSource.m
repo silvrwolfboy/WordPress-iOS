@@ -1,7 +1,8 @@
 #import "WPTableImageSource.h"
 #import "AccountService.h"
-#import "ContextManager.h"
+#import "CoreDataStack.h"
 #import "WPAccount.h"
+#import "WordPress-Swift.h"
 
 @import WordPressUI;
 @import WordPressShared;
@@ -126,8 +127,7 @@ static NSCache *sharedCache;
 
     if (isPrivate) {
         NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-        AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-        WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+        WPAccount *defaultAccount = [WPAccount lookupDefaultWordPressComAccountInContext:context];
         [[WPImageSource sharedSource] downloadImageForURL:url
                                                 authToken:[defaultAccount authToken]
                                               withSuccess:successBlock

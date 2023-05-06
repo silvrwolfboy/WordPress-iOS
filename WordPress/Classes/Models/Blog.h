@@ -8,9 +8,14 @@ NS_ASSUME_NONNULL_BEGIN
 @class BlogSettings;
 @class WPAccount;
 @class WordPressComRestApi;
+@class WordPressOrgRestApi;
 @class WordPressOrgXMLRPCApi;
 @class Role;
 @class QuickStartTourState;
+@class UserSuggestion;
+@class SiteSuggestion;
+@class PageTemplateCategory;
+@class JetpackFeaturesRemovalCoordinator;
 
 extern NSString * const BlogEntityName;
 extern NSString * const PostFormatStandard;
@@ -34,6 +39,8 @@ typedef NS_ENUM(NSUInteger, BlogFeature) {
     BlogFeatureActivity,
     /// Does the blog support mentions?
     BlogFeatureMentions,
+    /// Does the blog support xposts?
+    BlogFeatureXposts,
     /// Does the blog support push notifications?
     BlogFeaturePushNotifications,
     /// Does the blog support theme browsing?
@@ -69,7 +76,37 @@ typedef NS_ENUM(NSUInteger, BlogFeature) {
     /// Does the blog support deleting media?
     BlogFeatureMediaDeletion,
     /// Does the blog support Stock Photos feature (free photos library)
-    BlogFeatureStockPhotos
+    BlogFeatureStockPhotos,
+    /// Does the blog support Tenor feature (free GIF library)
+    BlogFeatureTenor,
+    /// Does the blog support setting the homepage type and pages?
+    BlogFeatureHomepageSettings,
+    /// Does the blog support stories?
+    BlogFeatureStories,
+    /// Does the blog support Jetpack contact info block?
+    BlogFeatureContactInfo,
+    BlogFeatureBlockEditorSettings,
+    /// Does the blog support the Layout grid block?
+    BlogFeatureLayoutGrid,
+    /// Does the blog support the tiled gallery block?
+    BlogFeatureTiledGallery,
+    /// Does the blog support the VideoPress block?
+    BlogFeatureVideoPress,
+    /// Does the blog support Facebook embed block?
+    BlogFeatureFacebookEmbed,
+    /// Does the blog support Instagram embed block?
+    BlogFeatureInstagramEmbed,
+    /// Does the blog support Loom embed block?
+    BlogFeatureLoomEmbed,
+    /// Does the blog support Smartframe embed block?
+    BlogFeatureSmartframeEmbed,
+    /// Does the blog support File Downloads section in stats?
+    BlogFeatureFileDownloadsStats,
+    /// Does the blog support Blaze?
+    BlogFeatureBlaze,
+    /// Does the blog support listing and editing Pages?
+    BlogFeaturePages,
+
 };
 
 typedef NS_ENUM(NSInteger, SiteVisibility) {
@@ -85,6 +122,7 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
 @property (nonatomic, strong, readwrite, nullable) NSNumber *dotComID;
 @property (nonatomic, strong, readwrite, nullable) NSString *xmlrpc;
 @property (nonatomic, strong, readwrite, nullable) NSString *apiKey;
+@property (nonatomic, strong, readwrite, nonnull) NSNumber *organizationID;
 @property (nonatomic, strong, readwrite, nullable) NSNumber *hasOlderPosts;
 @property (nonatomic, strong, readwrite, nullable) NSNumber *hasOlderPages;
 @property (nonatomic, strong, readwrite, nullable) NSSet<AbstractPost *> *posts;
@@ -92,9 +130,12 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
 @property (nonatomic, strong, readwrite, nullable) NSSet *tags;
 @property (nonatomic, strong, readwrite, nullable) NSSet *comments;
 @property (nonatomic, strong, readwrite, nullable) NSSet *connections;
+@property (nonatomic, strong, readwrite, nullable) NSSet *inviteLinks;
 @property (nonatomic, strong, readwrite, nullable) NSSet *domains;
 @property (nonatomic, strong, readwrite, nullable) NSSet *themes;
 @property (nonatomic, strong, readwrite, nullable) NSSet *media;
+@property (nonatomic, strong, readwrite, nullable) NSSet<UserSuggestion *> *userSuggestions;
+@property (nonatomic, strong, readwrite, nullable) NSSet<SiteSuggestion *> *siteSuggestions;
 @property (nonatomic, strong, readwrite, nullable) NSOrderedSet *menus;
 @property (nonatomic, strong, readwrite, nullable) NSOrderedSet *menuLocations;
 @property (nonatomic, strong, readwrite, nullable) NSSet<Role *> *roles;
@@ -126,12 +167,14 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
 @property (nonatomic, strong, readwrite, nullable) NSSet *sharingButtons;
 @property (nonatomic, strong, readwrite, nullable) NSDictionary *capabilities;
 @property (nonatomic, strong, readwrite, nullable) NSSet<QuickStartTourState *> *quickStartTours;
+@property (nonatomic, strong, readwrite, nullable) NSNumber *quickStartTypeValue;
+@property (nonatomic, assign, readwrite) BOOL isBlazeApproved;
 /// The blog's user ID for the current user
 @property (nonatomic, strong, readwrite, nullable) NSNumber *userID;
 /// Disk quota for site, this is only available for WP.com sites
 @property (nonatomic, strong, readwrite, nullable) NSNumber *quotaSpaceAllowed;
 @property (nonatomic, strong, readwrite, nullable) NSNumber *quotaSpaceUsed;
-
+@property (nullable, nonatomic, retain) NSSet<PageTemplateCategory *> *pageTemplateCategories;
 
 /**
  *  @details    Maps to a BlogSettings instance, which contains a collection of the available preferences, 
@@ -159,6 +202,7 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
 @property (nonatomic,   weak,  readonly, nullable) NSArray *sortedConnections;
 @property (nonatomic, readonly, nullable) NSArray<Role *> *sortedRoles;
 @property (nonatomic, strong,  readonly, nullable) WordPressOrgXMLRPCApi *xmlrpcApi;
+@property (nonatomic, strong,  readonly, nullable) WordPressOrgRestApi *wordPressOrgRestApi;
 @property (nonatomic,   weak,  readonly, nullable) NSString       *version;
 @property (nonatomic, strong,  readonly, nullable) NSString       *authToken;
 @property (nonatomic, strong,  readonly, nullable) NSSet *allowedFileTypes;
@@ -185,22 +229,29 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
 // Used to check if the blog has an icon set up
 @property (readonly) BOOL hasIcon;
 
+/** Determine timezone for blog from blog options.  If no timezone information is stored on the device, then assume GMT+0 is the default. */
+@property (readonly) NSTimeZone *timeZone;
+
 #pragma mark - Blog information
 
 - (BOOL)isAtomic;
+- (BOOL)isWPForTeams;
 - (BOOL)isAutomatedTransfer;
 - (BOOL)isPrivate;
+- (BOOL)isPrivateAtWPCom;
 - (nullable NSArray *)sortedCategories;
 - (nullable id)getOptionValue:(NSString *) name;
+- (void)setValue:(id)value forOption:(NSString *)name;
 - (NSString *)loginUrl;
 - (NSString *)urlWithPath:(NSString *)path;
 - (NSString *)adminUrlWithPath:(NSString *)path;
-- (NSUInteger)numberOfPendingComments;
 - (NSDictionary *) getImageResizeDimensions;
 - (BOOL)supportsFeaturedImages;
 - (BOOL)supports:(BlogFeature)feature;
 - (BOOL)supportsPublicize;
 - (BOOL)supportsShareButtons;
+- (BOOL)isStatsActive;
+- (BOOL)hasMappedDomain;
 
 /**
  *  Returnst the text description for a post format code
@@ -254,6 +305,10 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
  @return YES if there is a credential
  */
 - (BOOL)isBasicAuthCredentialStored;
+
+/// Checks the blogs installed WordPress version is more than or equal to the requiredVersion
+/// @param requiredVersion The minimum version to check for
+- (BOOL)hasRequiredWordPressVersion:(NSString *)requiredVersion;
 
 @end
 

@@ -3,36 +3,59 @@ import UIKit
 
 class SelectPostViewController: UITableViewController {
 
-    typealias SelectPostCallback = (_ url: String, _ title: String) -> ()
+    typealias SelectPostCallback = (AbstractPost) -> ()
     private var callback: SelectPostCallback?
 
     private var blog: Blog!
-    private var selectedLink: String?
+    private var isSelectedPost: ((AbstractPost) -> Bool)? = nil
+
+    /// If the cell should display the post type in the `detailTextLabel`
+    private var showsPostType: Bool = true
+
+    /// An entity to fetch which is of type `AbstractPost`
+    private let entityName: String?
+
+    /// The IDs of posts which should be hidden from the list
+    private let hiddenPosts: [Int]
+
+    /// Only include pubilished posts
+    private let publishedOnly: Bool
 
     private lazy var searchController: UISearchController = {
         let searchController = UISearchController(searchResultsController: nil)
         searchController.searchResultsUpdater = self
         searchController.hidesNavigationBarDuringPresentation = false
-        searchController.dimsBackgroundDuringPresentation = false
+        searchController.obscuresBackgroundDuringPresentation = false
         searchController.searchBar.sizeToFit()
         return searchController
     }()
 
     private lazy var fetchController: NSFetchedResultsController<AbstractPost> = {
-        return PostCoordinator.shared.posts(for: self.blog, wichTitleContains: "")
+        return PostCoordinator.shared.posts(for: blog, containsTitle: "", excludingPostIDs: hiddenPosts, entityName: entityName, publishedOnly: publishedOnly)
     }()
 
     // MARK: - Initialization
 
-    init(blog: Blog, selectedLink: String? = nil, callback: SelectPostCallback? = nil) {
+    init(blog: Blog,
+         isSelectedPost: ((AbstractPost) -> Bool)? = nil,
+         showsPostType: Bool = true,
+         entityName: String? = nil,
+         hiddenPosts: [Int] = [],
+         publishedOnly: Bool = false,
+         callback: SelectPostCallback? = nil) {
         self.blog = blog
-        self.selectedLink = selectedLink
+        self.isSelectedPost = isSelectedPost
         self.callback = callback
+        self.showsPostType = showsPostType
+        self.entityName = entityName
+        self.hiddenPosts = hiddenPosts
+        self.publishedOnly = publishedOnly
         super.init(style: .plain)
     }
 
+    @available(*, unavailable)
     required init?(coder aDecoder: NSCoder) {
-        super.init(coder: aDecoder)
+        fatalError("init(coder:) has not been implemented")
     }
 
     // MARK: - Lifecycle methods
@@ -82,12 +105,14 @@ extension SelectPostViewController {
 
         let post = fetchController.object(at: indexPath)
         cell.textLabel?.text = post.titleForDisplay()
-        if post is Page {
-            cell.detailTextLabel?.text = NSLocalizedString("Page", comment: "Noun. Type of content being selected is a blog page")
-        } else {
-            cell.detailTextLabel?.text = NSLocalizedString("Post", comment: "Noun. Type of content being selected is a blog post")
+        if showsPostType {
+            if post is Page {
+                cell.detailTextLabel?.text = NSLocalizedString("Page", comment: "Noun. Type of content being selected is a blog page")
+            } else {
+                cell.detailTextLabel?.text = NSLocalizedString("Post", comment: "Noun. Type of content being selected is a blog post")
+            }
         }
-        if post.permaLink == selectedLink {
+        if isSelectedPost?(post) == true {
             cell.accessoryType = .checkmark
         } else {
             cell.accessoryType = .none
@@ -104,11 +129,7 @@ extension SelectPostViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         let post = fetchController.object(at: indexPath)
-        guard let title = post.titleForDisplay(), let url = post.permaLink else {
-            return
-        }
-
-        callback?(url, title)
+        callback?(post)
     }
 }
 
@@ -119,7 +140,7 @@ extension SelectPostViewController: UISearchResultsUpdating {
 
     func updateSearchResults(for searchController: UISearchController) {
         let searchText = searchController.searchBar.text ?? ""
-        fetchController = PostCoordinator.shared.posts(for: blog, wichTitleContains: searchText)
+        fetchController = PostCoordinator.shared.posts(for: blog, containsTitle: searchText, excludingPostIDs: hiddenPosts, entityName: entityName, publishedOnly: publishedOnly)
         tableView.reloadData()
     }
 }

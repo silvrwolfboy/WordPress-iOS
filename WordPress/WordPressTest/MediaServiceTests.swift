@@ -1,21 +1,16 @@
 import Foundation
 @testable import WordPress
+import XCTest
 
-class MediaServiceTests: XCTestCase {
-    private var contextManager: TestContextManager!
+class MediaServiceTests: CoreDataTestCase {
     private var mediaService: MediaService!
     private var mediaBuilder: MediaBuilder!
     private var postBuilder: PostBuilder!
 
-    private var context: NSManagedObjectContext {
-        return contextManager.mainContext
-    }
-
     override func setUp() {
-        contextManager = TestContextManager()
-        mediaService = MediaService(managedObjectContext: context)
-        mediaBuilder = MediaBuilder(context)
-        postBuilder = PostBuilder(context)
+        mediaService = MediaService(managedObjectContext: mainContext)
+        mediaBuilder = MediaBuilder(mainContext)
+        postBuilder = PostBuilder(mainContext)
     }
 
     // MARK: - Tests for failedMediaForUpload(automatedRetry:)
@@ -25,7 +20,7 @@ class MediaServiceTests: XCTestCase {
     func testThatFailedMediaForUploadWorks() {
         let media = mediaBuilder.with(remoteStatus: .failed).build()
 
-        let failedMediaForUpload = mediaService.failedMediaForUpload(automatedRetry: false)
+        let failedMediaForUpload = Media.failedMediaForUpload(automatedRetry: false, in: mainContext)
 
         XCTAssertTrue(failedMediaForUpload.contains(media))
         XCTAssertEqual(failedMediaForUpload.count, 1)
@@ -36,7 +31,7 @@ class MediaServiceTests: XCTestCase {
     func testThatFailedMediaForUploadAfterMaxFailuresWorks() {
         let media = mediaBuilder.with(remoteStatus: .failed).with(autoUploadFailureCount: Media.maxAutoUploadFailureCount).build()
 
-        let failedMediaForUpload = mediaService.failedMediaForUpload(automatedRetry: false)
+        let failedMediaForUpload = Media.failedMediaForUpload(automatedRetry: false, in: mainContext)
 
         XCTAssertTrue(failedMediaForUpload.contains(media))
         XCTAssertEqual(failedMediaForUpload.count, 1)
@@ -47,7 +42,7 @@ class MediaServiceTests: XCTestCase {
     func testThatFailedMediaForUploadForAutomaticRetryWorks() {
         let media = mediaBuilder.with(remoteStatus: .failed).build()
 
-        let failedMediaForUpload = mediaService.failedMediaForUpload(automatedRetry: true)
+        let failedMediaForUpload = Media.failedMediaForUpload(automatedRetry: true, in: mainContext)
 
         XCTAssertTrue(failedMediaForUpload.contains(media))
         XCTAssertEqual(failedMediaForUpload.count, 1)
@@ -58,7 +53,7 @@ class MediaServiceTests: XCTestCase {
     func testThatFailedMediaForUploadForAutomaticRetryAfterMaxFailuresWorks() {
         mediaBuilder.with(remoteStatus: .failed).with(autoUploadFailureCount: Media.maxAutoUploadFailureCount).build()
 
-        let failedMediaForUpload = mediaService.failedMediaForUpload(automatedRetry: true)
+        let failedMediaForUpload = Media.failedMediaForUpload(automatedRetry: true, in: mainContext)
 
         XCTAssertEqual(failedMediaForUpload.count, 0)
     }
@@ -71,7 +66,7 @@ class MediaServiceTests: XCTestCase {
         let media = mediaBuilder.with(remoteStatus: .failed).build()
         let post = postBuilder.with(media: [media]).build()
 
-        let failedMediaForUpload = mediaService.failedMediaForUpload(in: post, automatedRetry: false)
+        let failedMediaForUpload = Media.failedForUpload(in: post, automatedRetry: false)
 
         XCTAssertTrue(failedMediaForUpload.contains(media))
         XCTAssertEqual(failedMediaForUpload.count, 1)
@@ -83,7 +78,7 @@ class MediaServiceTests: XCTestCase {
         let media = mediaBuilder.with(remoteStatus: .failed).with(autoUploadFailureCount: Media.maxAutoUploadFailureCount).build()
         let post = postBuilder.with(media: [media]).build()
 
-        let failedMediaForUpload = mediaService.failedMediaForUpload(in: post, automatedRetry: false)
+        let failedMediaForUpload = Media.failedForUpload(in: post, automatedRetry: false)
 
         XCTAssertTrue(failedMediaForUpload.contains(media))
         XCTAssertEqual(failedMediaForUpload.count, 1)
@@ -95,7 +90,7 @@ class MediaServiceTests: XCTestCase {
         let media = mediaBuilder.with(remoteStatus: .failed).build()
         let post = postBuilder.with(media: [media]).build()
 
-        let failedMediaForUpload = mediaService.failedMediaForUpload(in: post, automatedRetry: true)
+        let failedMediaForUpload = Media.failedForUpload(in: post, automatedRetry: true)
 
         XCTAssertTrue(failedMediaForUpload.contains(media))
         XCTAssertEqual(failedMediaForUpload.count, 1)
@@ -107,8 +102,33 @@ class MediaServiceTests: XCTestCase {
         let media = mediaBuilder.with(remoteStatus: .failed).with(autoUploadFailureCount: Media.maxAutoUploadFailureCount).build()
         let post = postBuilder.with(media: [media]).build()
 
-        let failedMediaForUpload = mediaService.failedMediaForUpload(in: post, automatedRetry: true)
+        let failedMediaForUpload = Media.failedForUpload(in: post, automatedRetry: true)
 
         XCTAssertEqual(failedMediaForUpload.count, 0)
+    }
+
+    // MARK: - Deleting Media
+
+    func testDeletingLocalMediaThatDoesntExistInCoreData() {
+        let firstDeleteSucceeds = expectation(description: "The delete call succeeds even if the media object isn't saved.")
+        let secondDeleteSucceeds = expectation(description: "The delete call succeeds even if the media object isn't saved.")
+
+        let media = mediaBuilder
+            .with(remoteStatus: .failed)
+            .with(autoUploadFailureCount: Media.maxAutoUploadFailureCount).build()
+
+        mediaService.delete(media) {
+            firstDeleteSucceeds.fulfill()
+        } failure: { error in
+            XCTFail("Media deletion failed with error: \(error)")
+        }
+
+        mediaService.delete(media) {
+            secondDeleteSucceeds.fulfill()
+        } failure: { error in
+            XCTFail("Media deletion failed with error: \(error)")
+        }
+
+        waitForExpectations(timeout: 0.1)
     }
 }

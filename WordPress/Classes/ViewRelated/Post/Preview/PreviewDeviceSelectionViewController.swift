@@ -1,34 +1,60 @@
 import Foundation
 
 class PreviewDeviceSelectionViewController: UIViewController {
-    enum PreviewDevice: CaseIterable {
-        case desktop
-        case `default`
-        case mobile
+    enum PreviewDevice: String, CaseIterable {
+        case desktop = "desktop"
+        case tablet = "tablet"
+        case mobile = "mobile"
+
+        static var `default`: PreviewDevice {
+            return UIDevice.current.userInterfaceIdiom == .pad ? .tablet : .mobile
+        }
 
         var title: String {
             switch self {
             case .desktop:
                 return NSLocalizedString("Desktop", comment: "Title for the desktop web preview")
-            case .`default`:
-                return NSLocalizedString("Default", comment: "Title for the default web preview")
+            case .tablet:
+                return NSLocalizedString("Tablet", comment: "Title for the tablet web preview")
             case .mobile:
                 return NSLocalizedString("Mobile", comment: "Title for the mobile web preview")
             }
         }
 
-        static var available: [PreviewDevice] {
-            if UIDevice.current.userInterfaceIdiom == .pad {
-                return [.mobile, .default]
-            } else {
-                return [.desktop, .default]
+        var width: CGFloat {
+            switch self {
+            case .desktop:
+                return 1200
+            case .tablet:
+                return 800
+            case .mobile:
+                return 400
             }
+        }
+
+        static var available: [PreviewDevice] {
+            return [.mobile, .tablet, .desktop]
+        }
+
+        var viewportScript: String {
+            let js = """
+            // remove all existing viewport meta tags - some themes included multiple, which is invalid
+            document.querySelectorAll("meta[name=viewport]").forEach( e => e.remove() );
+            // create our new meta element
+            const viewportMeta = document.createElement("meta");
+            viewportMeta.name = "viewport";
+            viewportMeta.content = "width=%1$d";
+            // insert the correct viewport meta tag
+            document.getElementsByTagName("head")[0].append(viewportMeta);
+            """
+
+            return String(format: js, NSInteger(width))
         }
     }
 
-    var selectedOption: PreviewDevice = .default
+    var selectedOption: PreviewDevice = PreviewDevice.default
 
-    var dismissHandler: ((PreviewDevice) -> Void)?
+    var onDeviceChange: ((PreviewDevice) -> Void)?
 
     lazy var tableView: UITableView = {
         let tableView = UITableView()
@@ -44,11 +70,7 @@ class PreviewDeviceSelectionViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         let blurEffect: UIBlurEffect
-        if #available(iOS 13.0, *) {
-            blurEffect = UIBlurEffect(style: .systemMaterial)
-        } else {
-            blurEffect = UIBlurEffect(style: .light)
-        }
+        blurEffect = UIBlurEffect(style: .systemMaterial)
 
         let effectView = UIVisualEffectView(effect: blurEffect)
 
@@ -119,7 +141,10 @@ extension PreviewDeviceSelectionViewController: UITableViewDataSource {
 
 extension PreviewDeviceSelectionViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        dismissHandler?(PreviewDevice.available[indexPath.row])
+        let newlySelectedDeviceMode = PreviewDevice.available[indexPath.row]
+        if newlySelectedDeviceMode != selectedOption {
+            onDeviceChange?(newlySelectedDeviceMode)
+        }
         dismiss(animated: true, completion: nil)
     }
 }

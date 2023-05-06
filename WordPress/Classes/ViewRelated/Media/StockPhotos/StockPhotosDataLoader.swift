@@ -1,5 +1,5 @@
 /// Implementations of this protocol will be notified when data is loaded from the StockPhotosService
-protocol StockPhotosDataLoaderDelegate: class {
+protocol StockPhotosDataLoaderDelegate: AnyObject {
     func didLoad(media: [StockPhotosMedia], reset: Bool)
 }
 
@@ -49,7 +49,7 @@ final class StockPhotosDataLoader {
             return
         }
 
-        // Bail out if we do not expect more pages of data 
+        // Bail out if we do not expect more pages of data
         guard request.pageable?.next() != nil else {
             return
         }

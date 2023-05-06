@@ -20,8 +20,7 @@ class PushAuthenticationManager {
 
 
     convenience init() {
-        let context = ContextManager.sharedInstance().mainContext
-        let service = PushAuthenticationService(managedObjectContext: context)
+        let service = PushAuthenticationService(coreDataStack: ContextManager.shared)
         self.init(pushAuthenticationService: service)
     }
 
@@ -71,6 +70,25 @@ class PushAuthenticationManager {
                 WPAnalytics.track(.pushAuthenticationIgnored)
             }
         }
+    }
+
+    /// Called as a part of approving a 2fa channel via a notification action.
+    ///
+    /// - Parameter userInfo: Is the Notification's payload.
+    ///
+    func handleAuthenticationApprovedAction(_ userInfo: NSDictionary?) {
+        guard isAuthenticationNotificationExpired(userInfo) == false else {
+            showLoginExpiredAlert()
+            WPAnalytics.track(.pushAuthenticationExpired)
+            return
+        }
+
+        guard let token = userInfo?["push_auth_token"] as? String else {
+            return
+        }
+
+        authorizeLogin(token, retryCount: Settings.initialRetryCount)
+        WPAnalytics.track(.pushAuthenticationApproved)
     }
 }
 

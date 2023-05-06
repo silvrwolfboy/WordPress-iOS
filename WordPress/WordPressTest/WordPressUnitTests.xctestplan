@@ -9,26 +9,38 @@
     }
   ],
   "defaultOptions" : {
-    "codeCoverage" : false,
+    "codeCoverage" : {
+      "targets" : [
+        {
+          "containerPath" : "container:WordPress.xcodeproj",
+          "identifier" : "1D6058900D05DD3D006BFB54",
+          "name" : "WordPress"
+        }
+      ]
+    },
+    "environmentVariableEntries" : [
+
+    ],
     "targetForVariableExpansion" : {
       "containerPath" : "container:WordPress.xcodeproj",
       "identifier" : "1D6058900D05DD3D006BFB54",
       "name" : "WordPress"
-    }
+    },
+    "testRepetitionMode" : "retryOnFailure"
   },
   "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:..\/WordPressFlux",
+        "identifier" : "WordPressFluxTests",
+        "name" : "WordPressFluxTests"
+      }
+    },
     {
       "target" : {
         "containerPath" : "container:WordPress.xcodeproj",
         "identifier" : "E16AB92914D978240047A2E5",
         "name" : "WordPressTest"
-      }
-    },
-    {
-      "target" : {
-        "containerPath" : "container:..\/WordPressFlux\/WordPressFlux.xcodeproj",
-        "identifier" : "E16A76E41FC4425000A661E3",
-        "name" : "WordPressFluxTests"
       }
     }
   ],

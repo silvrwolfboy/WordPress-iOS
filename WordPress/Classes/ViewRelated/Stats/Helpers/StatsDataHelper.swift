@@ -135,6 +135,11 @@ import Foundation
         let siteTimeZone = SiteStatsInformation.sharedInstance.siteTimeZone ?? .autoupdatingCurrent
         return Date().convert(from: siteTimeZone)
     }
+
+    class func yesterdayDateForSite() -> Date {
+        let components = DateComponents(day: -1)
+        return StatsDataHelper.calendar.date(byAdding: components, to: currentDateForSite()) ?? currentDateForSite()
+    }
 }
 
 fileprivate extension Date {
@@ -188,8 +193,8 @@ extension Date {
         // This is basically a Swift rewrite of https://github.com/wordpress-mobile/WordPressCom-Stats-iOS/blob/develop/WordPressCom-Stats-iOS/Services/StatsDateUtilities.m#L97
         // It could definitely use some love!
 
-        let calendar = StatsDataHelper.calendar
-        let now = StatsDataHelper.currentDateForSite()
+        let calendar = StatsDataHelper.calendarForSite
+        let now = Date()
 
         let components = calendar.dateComponents([.minute, .hour, .day], from: self, to: now)
         let days = components.day ?? 0

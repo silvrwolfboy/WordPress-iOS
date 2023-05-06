@@ -61,4 +61,35 @@ class Page: AbstractPost {
             hash(for: parentID?.intValue ?? 0)
         ]
     }
+
+    override func availableStatusesForEditing() -> [Any] {
+        if isSiteHomepage && isPublished() {
+            return [PostStatusPublish]
+        }
+        return super.availableStatusesForEditing()
+    }
+
+    // MARK: - Homepage Settings
+
+    @objc var isSiteHomepage: Bool {
+        guard let postID = postID,
+            let homepageID = blog.homepagePageID,
+            let homepageType = blog.homepageType,
+            homepageType == .page else {
+            return false
+        }
+
+        return homepageID == postID.intValue
+    }
+
+    @objc var isSitePostsPage: Bool {
+        guard let postID = postID,
+            let postsPageID = blog.homepagePostsPageID,
+            let homepageType = blog.homepageType,
+            homepageType == .page else {
+            return false
+        }
+
+        return postsPageID == postID.intValue
+    }
 }

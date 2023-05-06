@@ -1,5 +1,6 @@
 import UIKit
 import Gridicons
+import WordPressShared
 
 final class SiteTagsViewController: UITableViewController {
     private struct TableConstants {
@@ -36,7 +37,7 @@ final class SiteTagsViewController: UITableViewController {
     fileprivate lazy var searchController: UISearchController = {
         let returnValue = UISearchController(searchResultsController: nil)
         returnValue.hidesNavigationBarDuringPresentation = false
-        returnValue.dimsBackgroundDuringPresentation = false
+        returnValue.obscuresBackgroundDuringPresentation = false
         returnValue.searchResultsUpdater = self
         returnValue.delegate = self
 
@@ -309,6 +310,7 @@ extension SiteTagsViewController {
         newTag.tagDescription = data.subtitle
 
         save(newTag)
+        WPAnalytics.trackSettingsChange("site_tags", fieldName: "add_tag")
     }
 
     private func updateTag(_ tag: PostTag, updatedData: SettingsTitleSubtitleController.Content) {
@@ -323,6 +325,7 @@ extension SiteTagsViewController {
         tag.tagDescription = updatedData.subtitle
 
         save(tag)
+        WPAnalytics.trackSettingsChange("site_tags", fieldName: "edit_tag")
     }
 
     private func existingTagForData(_ data: SettingsTitleSubtitleController.Content) -> PostTag? {
@@ -365,7 +368,7 @@ extension SiteTagsViewController {
         let confirmationSubtitle = NSLocalizedString("Are you sure you want to delete this tag?", comment: "Message asking for confirmation on tag deletion")
         let actionTitle = NSLocalizedString("Delete", comment: "Delete")
         let cancelTitle = NSLocalizedString("Cancel", comment: "Alert dismissal title")
-        let trashIcon = Gridicon.iconOfType(.trash)
+        let trashIcon = UIImage.gridicon(.trash)
 
         return SettingsTitleSubtitleController.Confirmation(title: confirmationTitle,
                                                             subtitle: confirmationSubtitle,

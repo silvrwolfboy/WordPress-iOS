@@ -67,12 +67,11 @@ private extension CountriesMapView {
     }
 
     func mapColors() -> [UIColor] {
-        if #available(iOS 13, *) {
-            if traitCollection.userInterfaceStyle == .dark {
-                return [.accent(.shade90), .accent]
-            }
+        if traitCollection.userInterfaceStyle == .dark {
+            return [.primary(.shade90), .primary]
+        } else {
+            return [.primary(.shade5), .primary]
         }
-        return [.accent(.shade5), .accent]
     }
 
     func setGradientColors() {

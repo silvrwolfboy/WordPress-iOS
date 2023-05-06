@@ -25,12 +25,14 @@ CGFloat const PostFeaturedImageCellMargin = 15.0f;
 {
     [self layoutImageView];
     _imageLoader = [[ImageLoader alloc] initWithImageView:self.featuredImageView gifStrategy:GIFStrategyLargeGIFs];
+    self.accessibilityLabel = NSLocalizedString(@"A featured image is set. Tap to change it.", @"Label for image that is set as a feature image for post/page");
+    self.accessibilityIdentifier = @"CurrentFeaturedImage";
 }
 
-- (void)setImageWithURL:(NSURL *)url inPost:(id<ImageSourceInformation>)postInformation withSize:(CGSize)size
+- (void)setImageWithURL:(NSURL *)url inPost:(AbstractPost *)post withSize:(CGSize)size
 {
     __weak PostFeaturedImageCell *weakSelf = self;
-    [self.imageLoader loadImageWithURL:url fromPost:postInformation preferredSize:size placeholder:nil success:^{
+    [self.imageLoader loadImageWithURL:url fromPost:post preferredSize:size placeholder:nil success:^{
         [weakSelf informDelegateImageLoaded];
     } error:^(NSError * _Nullable error) {
         if (weakSelf && weakSelf.delegate) {

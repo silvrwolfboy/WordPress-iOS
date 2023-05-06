@@ -29,7 +29,7 @@ private class InlineErrorRetryTableViewCellAccessoryView: UIStackView {
 
     init() {
         self.retryImageView = {
-            let dismissImage = Gridicon.iconOfType(.refresh).imageWithTintColor(.primary)
+            let dismissImage = UIImage.gridicon(.refresh).imageWithTintColor(.primary)
             let imageView = UIImageView(image: dismissImage)
 
             imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -113,7 +113,7 @@ final class InlineErrorRetryTableViewCell: UITableViewCell, ReusableCell {
 
     // MARK: Internal behavior
 
-    func setMessage(_ message: InlineErrorMessage) {
+    func setMessage(_ message: String) {
         textLabel?.text = message
     }
 
@@ -125,7 +125,7 @@ final class InlineErrorRetryTableViewCell: UITableViewCell, ReusableCell {
             label.textColor = .neutral(.shade40)
         }
 
-        let borderColor = UIColor.neutral(.shade10)
+        let borderColor = UIColor.divider
         addTopBorder(withColor: borderColor)
         addBottomBorder(withColor: borderColor)
 

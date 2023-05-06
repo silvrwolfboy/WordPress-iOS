@@ -1,4 +1,3 @@
-
 import UIKit
 import Gridicons
 
@@ -6,49 +5,153 @@ import Gridicons
 /// After instantiating using `newEdit()` the class expects the `content` and `onExitFullscreen`
 /// properties to be set.
 
-class FullScreenCommentReplyViewController: EditCommentViewController {
-    private struct Parameters {
-        /// Determines the size of the replyButton
-        static let replyButtonIconSize = CGSize(width: 21, height: 18)
-    }
+
+/// Keeps track of the position of the suggestions view
+fileprivate enum SuggestionsPosition: Int {
+    case hidden
+    case top
+    case bottom
+}
+
+public class FullScreenCommentReplyViewController: EditCommentViewController, SuggestionsTableViewDelegate {
 
     /// The completion block that is called when the view is exiting fullscreen
     /// - Parameter: Bool, whether or not the calling view should trigger a save
     /// - Parameter: String, the updated comment content
-    public var onExitFullscreen: ((Bool, String) -> ())?
+    /// - Parameter: String, the last search text used to show the suggestions list.
+    public var onExitFullscreen: ((Bool, String, String?) -> ())?
 
     /// The save/reply button that is displayed in the rightBarButtonItem position
-    private(set) var replyButton: UIButton!
+    private(set) var replyButton: UIBarButtonItem!
 
-    // MARK: - View Methods
-    override func viewDidLoad() {
-        super.viewDidLoad()
+    /// Reply Suggestions
+    private var siteID: NSNumber?
+    private var prominentSuggestionsIds: [NSNumber]?
+    private var suggestionsTableView: SuggestionsTableView?
+    private var searchText: String?
 
-        title = NSLocalizedString("Comment", comment: "User facing, navigation bar title")
+    private var viewModel: FullScreenCommentReplyViewModelType
 
-        setupReplyButton()
-        setupNavigationItems()
-        configureAppearance()
+    // Static margin between the suggestions view and the text cursor position
+    private let suggestionViewMargin: CGFloat = 5
+
+    public var placeholder = String()
+
+    init(viewModel: FullScreenCommentReplyViewModelType = FullScreenCommentReplyViewModel()) {
+        self.viewModel = viewModel
+        super.init(nibName: Self.nibName(), bundle: nil)
     }
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
-        enableRefreshButtonIfNeeded(animated: false)
+    // MARK: - View Methods
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        placeholderLabel.text = placeholder
+        setupNavigationItems()
+        configureNavigationAppearance()
+    }
+
+    public override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        refreshPlaceholder()
+        refreshReplyButton()
+    }
+
+    public override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        setupSuggestionsTableViewIfNeeded()
+        showSuggestionsViewIfNeeded()
+
+        WPAnalytics.track(.commentFullScreenEntered)
+    }
+
+    // MARK: - Public Methods
+
+    /// Enables the @ mention suggestions while editing
+    /// - Parameter siteID: The ID of the site to determine if suggestions are enabled or not
+    /// - Parameter prominentSuggestionsIds: The suggestions ids to display at the top of the suggestions list.
+    /// - Parameter searchText: The last search text used to show the suggestions list.
+    @objc func enableSuggestions(with siteID: NSNumber, prominentSuggestionsIds: [NSNumber]?, searchText: String?) {
+        self.siteID = siteID
+        self.prominentSuggestionsIds = prominentSuggestionsIds
+        self.searchText = searchText
+    }
+
+    /// Description
+    private func setupSuggestionsTableViewIfNeeded() {
+        guard let siteID = siteID, shouldShowSuggestions else {
+            return
+        }
+
+        suggestionsTableView = viewModel.suggestionsTableView(
+            with: siteID,
+            useTransparentHeader: true,
+            prominentSuggestionsIds: prominentSuggestionsIds,
+            delegate: self
+        )
+
+        attachSuggestionsViewIfNeeded()
+    }
+
+    private func showSuggestionsViewIfNeeded() {
+        guard let searchText = searchText, !searchText.isEmpty else {
+            return
+        }
+        suggestionsTableView?.showSuggestions(forWord: searchText)
     }
 
     // MARK: - UITextViewDelegate
-    override func textViewDidBeginEditing(_ textView: UITextView) { }
-    override func textViewDidEndEditing(_ textView: UITextView) { }
+    public override func textViewDidBeginEditing(_ textView: UITextView) { }
+    public override func textViewDidEndEditing(_ textView: UITextView) { }
 
-    override func contentDidChange() {
-        enableRefreshButtonIfNeeded()
+    public override func contentDidChange() {
+        refreshPlaceholder()
+        refreshReplyButton()
+    }
+
+    public override func textViewDidChangeSelection(_ textView: UITextView) {
+        if didChangeText {
+            //If the didChangeText flag is true, reset it here
+            didChangeText = false
+            return
+        }
+
+        //If the user just changes the selection, then hide the suggestions
+        suggestionsTableView?.hideSuggestions()
+    }
+
+
+    public override func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        guard shouldShowSuggestions else {
+            return true
+        }
+
+        let textViewText: NSString = textView.text as NSString
+        let prerange = NSMakeRange(0, range.location)
+        let pretext = textViewText.substring(with: prerange) + text
+        let words = pretext.components(separatedBy: CharacterSet.whitespacesAndNewlines)
+        let lastWord: NSString = words.last! as NSString
+
+        didTypeWord(lastWord as String)
+
+        didChangeText = true
+        return true
+    }
+
+    private func didTypeWord(_ word: String) {
+        guard let tableView = suggestionsTableView else {
+            return
+        }
+
+        tableView.showSuggestions(forWord: word)
     }
 
     // MARK: - Actions
     @objc func btnSavePressed() {
         exitFullscreen(shouldSave: true)
-
     }
 
     @objc func btnExitFullscreenPressed() {
@@ -57,40 +160,23 @@ class FullScreenCommentReplyViewController: EditCommentViewController {
 
     // MARK: - Private: Helpers
 
-    /// Updates the iOS 13 title color
-    private func configureAppearance() {
-        if #available(iOS 13.0, *) {
-            guard let navigationBar = navigationController?.navigationBar else {
-                return
-            }
+    private func configureNavigationAppearance() {
+        // Remove the title
+        title = ""
 
-            navigationBar.standardAppearance.titleTextAttributes = [
-                NSAttributedString.Key.foregroundColor: UIColor.text
-            ]
-        }
-    }
-
-    /// Creates the `replyButton` to be used as the `rightBarButtonItem`
-    private func setupReplyButton() {
-        replyButton = {
-            let iconSize = Parameters.replyButtonIconSize
-            let replyIcon = UIImage(named: "icon-comment-reply")
-
-            let button = UIButton(frame: CGRect(origin: CGPoint(x: 0, y: 0), size: iconSize))
-            button.setImage(replyIcon?.imageWithTintColor(WPStyleGuide.Reply.enabledColor), for: .normal)
-            button.setImage(replyIcon?.imageWithTintColor(WPStyleGuide.Reply.disabledColor), for: .disabled)
-            button.accessibilityLabel = NSLocalizedString("Reply", comment: "Accessibility label for the reply button")
-            button.isEnabled = false
-            button.addTarget(self, action: #selector(btnSavePressed), for: .touchUpInside)
-
-            return button
-        }()
+        // Hide the bottom line on the navigation bar
+        let appearance = navigationController?.navigationBar.standardAppearance ?? UINavigationBarAppearance()
+        appearance.configureWithTransparentBackground()
+        appearance.backgroundColor = .basicBackground
+        appearance.shadowImage = UIImage()
+        navigationItem.standardAppearance = appearance
+        navigationItem.compactAppearance = appearance
     }
 
     /// Creates the `leftBarButtonItem` and the `rightBarButtonItem`
     private func setupNavigationItems() {
         navigationItem.leftBarButtonItem = ({
-            let image = Gridicon.iconOfType(.chevronDown).imageWithTintColor(.listIcon)
+            let image = UIImage.gridicon(.chevronDown).imageWithTintColor(.primary)
             let leftItem = UIBarButtonItem(image: image,
                                            style: .plain,
                                            target: self,
@@ -102,44 +188,25 @@ class FullScreenCommentReplyViewController: EditCommentViewController {
         })()
 
         navigationItem.rightBarButtonItem = ({
-            let rightItem = UIBarButtonItem(customView: replyButton)
+            let rightItem = UIBarButtonItem(title: NSLocalizedString("Reply", comment: "Reply to a comment."),
+                                            style: .plain,
+                                            target: self,
+                                            action: #selector(btnSavePressed))
 
-            if let customView = rightItem.customView {
-                let iconSize = Parameters.replyButtonIconSize
-
-                customView.widthAnchor.constraint(equalToConstant: iconSize.width).isActive = true
-                customView.heightAnchor.constraint(equalToConstant: iconSize.height).isActive = true
-            }
-
+            rightItem.accessibilityLabel = NSLocalizedString("Reply", comment: "Accessibility label for the reply button")
+            rightItem.isEnabled = false
+            replyButton = rightItem
             return rightItem
         })()
     }
 
     /// Changes the `refreshButton` enabled state
-    /// - Parameter animated: Whether or not the state change should be animated
-    fileprivate func enableRefreshButtonIfNeeded(animated: Bool = true) {
-        let whitespaceCharSet = CharacterSet.whitespacesAndNewlines
-        let isEnabled = textView.text.trimmingCharacters(in: whitespaceCharSet).isEmpty == false
+    private func refreshReplyButton() {
+        replyButton.isEnabled = !(textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
 
-        if isEnabled == replyButton.isEnabled {
-            return
-        }
-
-        let setEnabled = {
-            self.replyButton.isEnabled = isEnabled
-        }
-
-        if animated == false {
-            setEnabled()
-            return
-        }
-
-        UIView.transition(with: replyButton as UIView,
-                          duration: 0.2,
-                          options: .transitionCrossDissolve,
-                          animations: {
-                            setEnabled()
-        })
+    private func refreshPlaceholder() {
+        placeholderLabel.isHidden = !textView.text.isEmpty
     }
 
     /// Triggers the `onExitFullscreen` completion handler
@@ -151,6 +218,151 @@ class FullScreenCommentReplyViewController: EditCommentViewController {
 
         let updatedText = textView.text ?? ""
 
-        completion(shouldSave, updatedText)
+        let lastSuggestionsSearchText = shouldSave ? nil : suggestionsTableView?.viewModel.searchText
+
+        completion(shouldSave, updatedText, lastSuggestionsSearchText)
+        WPAnalytics.track(.commentFullScreenExited)
     }
+
+    var suggestionsTop: NSLayoutConstraint!
+
+    fileprivate var initialSuggestionsPosition: SuggestionsPosition = .hidden
+    fileprivate var didChangeText: Bool = false
+}
+
+// MARK: - SuggestionsTableViewDelegate
+//
+public extension FullScreenCommentReplyViewController {
+    func suggestionsTableView(_ suggestionsTableView: SuggestionsTableView, didSelectSuggestion suggestion: String?, forSearchText text: String) {
+        replaceTextAtCaret(text as NSString?, withText: suggestion)
+        suggestionsTableView.showSuggestions(forWord: String())
+    }
+
+    func suggestionsTableView(_ suggestionsTableView: SuggestionsTableView, didChangeTableBounds bounds: CGRect) {
+        if suggestionsTableView.isHidden {
+            self.initialSuggestionsPosition = .hidden
+        } else {
+            self.repositionSuggestions()
+        }
+    }
+
+    func suggestionsTableViewMaxDisplayedRows(_ suggestionsTableView: SuggestionsTableView) -> Int {
+        return 3
+    }
+
+    override func handleKeyboardDidShow(_ notification: Foundation.Notification?) {
+        super.handleKeyboardDidShow(notification)
+
+        self.initialSuggestionsPosition = .hidden
+        self.repositionSuggestions()
+    }
+
+    override func handleKeyboardWillHide(_ notification: Foundation.Notification?) {
+        super.handleKeyboardWillHide(notification)
+
+        self.initialSuggestionsPosition = .hidden
+        self.repositionSuggestions()
+    }
+}
+
+// MARK: - Suggestions View Helpers
+//
+private extension FullScreenCommentReplyViewController {
+
+    /// Calculates a CGRect for the text caret and converts its value to the view's coordindate system
+    var absoluteTextCursorRect: CGRect {
+        let selectedRangeStart = textView.selectedTextRange?.start ?? UITextPosition()
+        var caretRect = textView.caretRect(for: selectedRangeStart)
+        caretRect = textView.convert(caretRect, to: view)
+
+        return caretRect.integral
+    }
+
+    func repositionSuggestions() {
+        guard let suggestions = suggestionsTableView else {
+            return
+        }
+
+        let caretRect = absoluteTextCursorRect
+        let margin = suggestionViewMargin
+        let suggestionsHeight = suggestions.frame.height
+
+
+        // Calculates the height of the view minus the keyboard if its visible
+        let calculatedViewHeight = (view.frame.height - keyboardFrame.height)
+
+        var position: SuggestionsPosition = .bottom
+
+        // Calculates the direction the suggestions view should appear
+        // And the global position
+
+        // If the estimated position of the suggestion will appear below the bottom of the view
+        // then display it in the top position
+        if (caretRect.maxY + suggestionsHeight) > calculatedViewHeight {
+            position = .top
+        }
+
+        // If the user is typing we don't want to change the position of the suggestions view
+        if position == initialSuggestionsPosition || initialSuggestionsPosition == .hidden {
+            initialSuggestionsPosition = position
+        }
+
+        var constant: CGFloat = 0
+
+        switch initialSuggestionsPosition {
+        case .top:
+            constant = (caretRect.minY - suggestionsHeight - margin)
+
+        case .bottom:
+            constant = caretRect.maxY + margin
+
+        case .hidden:
+            constant = 0
+        }
+
+        suggestionsTop.constant = constant
+    }
+
+    func attachSuggestionsViewIfNeeded() {
+        guard let tableView = suggestionsTableView else {
+            return
+        }
+
+        guard shouldShowSuggestions else {
+            tableView.removeFromSuperview()
+            return
+        }
+
+        // We're adding directly to the navigation controller view to allow the suggestions to appear
+        // above the nav bar, this only happens on smaller screens when the keyboard is open
+        navigationController?.view.addSubview(tableView)
+
+        suggestionsTop = tableView.topAnchor.constraint(equalTo: view.topAnchor, constant: 0)
+
+        NSLayoutConstraint.activate([
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            suggestionsTop,
+        ])
+    }
+
+
+    /// Determine if suggestions are enabled and visible for this site
+    var shouldShowSuggestions: Bool {
+        return viewModel.shouldShowSuggestions(with: siteID)
+    }
+
+    // This should be moved elsewhere
+    func replaceTextAtCaret(_ text: NSString?, withText replacement: String?) {
+        guard let replacementText = replacement,
+              let textToReplace = text,
+              let selectedRange = textView.selectedTextRange,
+              let newPosition = textView.position(from: selectedRange.start, offset: -textToReplace.length),
+              let newRange = textView.textRange(from: newPosition, to: selectedRange.start) else {
+            return
+        }
+
+        textView.replace(newRange, withText: replacementText)
+    }
+
 }

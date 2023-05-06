@@ -155,9 +155,9 @@ class MediaItemDocumentTableViewCell: WPTableViewCell {
         let size = CGSize(width: dimension, height: dimension)
 
         if media.mediaType == .audio {
-            customImageView.image = Gridicon.iconOfType(.audio, withSize: size)
+            customImageView.image = .gridicon(.audio, size: size)
         } else {
-            customImageView.image = Gridicon.iconOfType(.pages, withSize: size)
+            customImageView.image = .gridicon(.pages, size: size)
         }
     }
 }
@@ -175,6 +175,9 @@ struct MediaImageRow: ImmuTableRow {
             setAspectRatioFor(cell)
             loadImageFor(cell)
             cell.isVideo = media.mediaType == .video
+            cell.accessibilityTraits = .button
+            cell.accessibilityLabel = NSLocalizedString("Preview media", comment: "Accessibility label for media item preview for user's viewing an item in their media library")
+            cell.accessibilityHint = NSLocalizedString("Tap to view media in full screen", comment: "Accessibility hint for media item preview for user's viewing an item in their media library")
         }
     }
 
@@ -213,7 +216,8 @@ struct MediaImageRow: ImmuTableRow {
     }
 
     private func loadImageFor(_ cell: MediaItemImageTableViewCell) {
-        cell.imageLoader.loadImage(media: media, placeholder: placeholderImage, success: nil) { (error) in
+        let isBlogAtomic = media.blog.isAtomic()
+        cell.imageLoader.loadImage(media: media, placeholder: placeholderImage, isBlogAtomic: isBlogAtomic, success: nil) { (error) in
             self.show(error)
         }
     }
@@ -221,7 +225,11 @@ struct MediaImageRow: ImmuTableRow {
     private func show(_ error: Error?) {
         let alertController = UIAlertController(title: nil, message: NSLocalizedString("There was a problem loading the media item.",
                                                                                        comment: "Error message displayed when the Media Library is unable to load a full sized preview of an item."), preferredStyle: .alert)
-        alertController.addCancelActionWithTitle(NSLocalizedString("Dismiss", comment: "Verb. User action to dismiss error alert when failing to load media item."))
+        alertController.addCancelActionWithTitle(NSLocalizedString(
+            "mediaItemTable.errorAlert.dismissButton",
+            value: "Dismiss",
+            comment: "Verb. User action to dismiss error alert when failing to load media item."
+        ))
         alertController.presentFromRootViewController()
     }
 }
@@ -239,6 +247,9 @@ struct MediaDocumentRow: ImmuTableRow {
         if let cell = cell as? MediaItemDocumentTableViewCell {
             cell.customImageView.tintColor = cell.textLabel?.textColor
             cell.showIconForMedia(media)
+            cell.accessibilityTraits = .button
+            cell.accessibilityLabel = NSLocalizedString("Preview media", comment: "Accessibility label for media item preview for user's viewing an item in their media library")
+            cell.accessibilityHint = NSLocalizedString("Tap to view media in full screen", comment: "Accessibility hint for media item preview for user's viewing an item in their media library")
         }
     }
 }

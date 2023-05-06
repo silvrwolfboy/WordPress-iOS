@@ -38,7 +38,7 @@ class ExpandableCell: WPReusableTableViewCell {
                 alpha = 0
             }
 
-            UIView.animate(withDuration: 0.2) { [unowned self] in
+            UIView.animate(withDuration: 0.2) {
                 self.chevronImageView?.transform = transform
                 self.expandableTextView?.alpha = alpha
             }
@@ -54,7 +54,7 @@ class ExpandableCell: WPReusableTableViewCell {
     }
 
     private func setupSubviews() {
-        chevronImageView?.image = Gridicon.iconOfType(.chevronDown)
+        chevronImageView?.image = .gridicon(.chevronDown)
         chevronImageView?.tintColor = WPStyleGuide.cellGridiconAccessoryColor()
 
         titleTextLabel?.textColor = .text

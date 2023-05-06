@@ -161,7 +161,7 @@ static CGFloat const MinimumZoomScale = 0.1;
 {
     self.activityIndicatorView = [[CircularProgressView alloc] initWithStyle:CircularProgressViewStyleWhite];
     AccessoryView *errorView = [[AccessoryView alloc] init];
-    errorView.imageView.image = [Gridicon iconOfType:GridiconTypeNoticeOutline];
+    errorView.imageView.image = [UIImage gridiconOfType:GridiconTypeNoticeOutline];
     errorView.label.text = NSLocalizedString(@"Error", @"Generic error.");
     self.activityIndicatorView.errorView = errorView;
 }
@@ -246,22 +246,34 @@ static CGFloat const MinimumZoomScale = 0.1;
     [self.imageView sizeToFit];
     self.scrollView.contentSize = self.imageView.image.size;
     [self centerImage];
+    
 }
 
 - (void)loadImageFromURL
 {
     self.isLoadingImage = YES;
     __weak __typeof__(self) weakSelf = self;
-    [_imageView downloadImageUsingRequest:[NSURLRequest requestWithURL:self.url]
-                      placeholderImage:self.image
-                               success:^(UIImage *image) {
-                                   weakSelf.image = image;
-                                   [weakSelf updateImageView];
-                                   weakSelf.isLoadingImage = NO;
-                               } failure:^(NSError *error) {
-                                   DDLogError(@"Error loading image: %@", error);
-                                   [weakSelf.activityIndicatorView showError];
-                               }];
+    if (self.readerPost != NULL) {
+        [self.imageLoader loadImageWithURL:self.url fromReaderPost:self.readerPost preferredSize:CGSizeZero placeholder:self.image success:^{
+            weakSelf.isLoadingImage = NO;
+            weakSelf.image = weakSelf.imageView.image;
+            [weakSelf updateImageView];
+        } error:^(NSError * _Nullable error) {
+            [weakSelf.activityIndicatorView showError];
+            DDLogError(@"Error loading image: %@", error);
+        }];
+    } else {
+        [_imageView downloadImageUsingRequest:[NSURLRequest requestWithURL:self.url]
+                          placeholderImage:self.image
+                                   success:^(UIImage *image) {
+                                       weakSelf.image = image;
+                                       [weakSelf updateImageView];
+                                       weakSelf.isLoadingImage = NO;
+                                   } failure:^(NSError *error) {
+                                       DDLogError(@"Error loading image: %@", error);
+                                       [weakSelf.activityIndicatorView showError];
+                                   }];
+    }
 }
 
 - (void)loadImageFromMedia
@@ -269,7 +281,8 @@ static CGFloat const MinimumZoomScale = 0.1;
     self.imageView.image = self.image;
     self.isLoadingImage = YES;
     __weak __typeof__(self) weakSelf = self;
-    [self.imageLoader loadImageFromMedia:self.media preferredSize:CGSizeZero placeholder:self.image success:^{
+    BOOL isBlogAtomic = [self.media.blog isAtomic];
+    [self.imageLoader loadImageFromMedia:self.media preferredSize:CGSizeZero placeholder:self.image isBlogAtomic:isBlogAtomic success:^{
         weakSelf.isLoadingImage = NO;
         weakSelf.image = weakSelf.imageView.image;
         [weakSelf updateImageView];
@@ -354,7 +367,9 @@ static CGFloat const MinimumZoomScale = 0.1;
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
 {
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
-    [self centerImage];
+    [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext>  _Nonnull __unused context) {
+        [self centerImage];
+    } completion:nil];
 }
 
 - (BOOL)prefersHomeIndicatorAutoHidden
@@ -555,6 +570,14 @@ static CGFloat const MinimumZoomScale = 0.1;
 {
     self.imageView.isAccessibilityElement = YES;
     self.imageView.accessibilityTraits = UIAccessibilityTraitImage;
+    
+    if (self.media != nil && self.media.title != nil) {
+        self.imageView.accessibilityLabel = [NSString stringWithFormat:NSLocalizedString(@"Fullscreen view of image %@. Double tap to dismiss", @"Accessibility label for when image is shown to user in full screen, with instructions on how to dismiss the screen. Placeholder is the title of the image"), self.media.title];
+    }
+    else {
+        self.imageView.accessibilityLabel = NSLocalizedString(@"Fullscreen view of image. Double tap to dismiss", @"Accessibility label for when image is shown to user in full screen, with instructions on how to dismiss the screen");
+    }
+
 }
 
 - (BOOL)accessibilityPerformEscape

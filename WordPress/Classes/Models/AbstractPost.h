@@ -96,7 +96,7 @@ typedef NS_ENUM(NSUInteger, AbstractPostRemoteStatus) {
 - (NSString *)blavatarForDisplay;
 - (NSString *)dateStringForDisplay;
 - (BOOL)isMultiAuthorBlog;
-- (BOOL)isPrivate;
+- (BOOL)isPrivateAtWPCom;
 - (BOOL)supportsStats;
 
 
@@ -151,6 +151,11 @@ typedef NS_ENUM(NSUInteger, AbstractPostRemoteStatus) {
  Returns YES if the post is a draft
  */
 - (BOOL)isDraft;
+
+/**
+ Returns YES if the post is a published.
+ */
+- (BOOL)isPublished;
 
 /**
  Returns YES if the original post is a draft

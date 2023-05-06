@@ -11,26 +11,36 @@ final class ReaderSaveForLaterAction {
         static let removeFromSavedError = NSLocalizedString("Could not remove post from Saved for Later", comment: "Title of a prompt.")
     }
 
-    private let visibleConfirmation: Bool
+    var visibleConfirmation: Bool
 
     init(visibleConfirmation: Bool = false) {
         self.visibleConfirmation = visibleConfirmation
     }
 
-    func execute(with post: ReaderPost, context: NSManagedObjectContext, origin: ReaderSaveForLaterOrigin, completion: (() -> Void)? = nil) {
+    func execute(with post: ReaderPost, context: NSManagedObjectContext, origin: ReaderSaveForLaterOrigin, viewController: UIViewController?, completion: (() -> Void)? = nil) {
+        /// Preload the post
+        if let viewController = viewController, !post.isSavedForLater {
+            let offlineReaderWebView = OfflineReaderWebView()
+            offlineReaderWebView.saveForLater(post, viewController: viewController)
+        }
+
         trackSaveAction(for: post, origin: origin)
         toggleSavedForLater(post, context: context, origin: origin, completion: completion)
     }
 
     private func toggleSavedForLater(_ post: ReaderPost, context: NSManagedObjectContext, origin: ReaderSaveForLaterOrigin, completion: (() -> Void)?) {
-        let readerPostService = ReaderPostService(managedObjectContext: context)
+        let readerPostService = ReaderPostService(coreDataStack: ContextManager.shared)
 
         readerPostService.toggleSavedForLater(for: post, success: {
-            self.presentSuccessNotice(for: post, context: context, origin: origin, completion: completion)
+            if origin == .otherStream {
+                self.presentSuccessNotice(for: post, context: context, origin: origin, completion: completion)
+            }
             completion?()
-            }, failure: { error in
+        }, failure: { error in
+            if origin == .otherStream {
                 self.presentErrorNotice(error, activating: !post.isSavedForLater)
-                completion?()
+            }
+            completion?()
         })
     }
 
@@ -55,7 +65,7 @@ final class ReaderSaveForLaterAction {
                             actionTitle: Strings.viewAll,
                             actionHandler: { _ in
                                 self.trackViewAllSavedPostsAction(origin: origin)
-                                self.showAll()
+                                    RootViewCoordinator.sharedPresenter.switchToSavedPosts()
         })
 
         present(notice)
@@ -93,7 +103,4 @@ final class ReaderSaveForLaterAction {
         ActionDispatcher.dispatch(NoticeAction.post(notice))
     }
 
-    private func showAll() {
-        NotificationCenter.default.post(name: .showAllSavedForLaterPosts, object: self, userInfo: nil)
-    }
 }

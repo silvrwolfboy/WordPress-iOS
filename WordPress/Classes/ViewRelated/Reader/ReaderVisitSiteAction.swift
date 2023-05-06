@@ -9,12 +9,13 @@ final class ReaderVisitSiteAction {
 
         let configuration = WebViewControllerConfiguration(url: siteURL)
         configuration.addsWPComReferrer = true
-        let service = AccountService(managedObjectContext: context)
-        if let account = service.defaultWordPressComAccount() {
+
+        if let account = try? WPAccount.lookupDefaultWordPressComAccount(in: context) {
             configuration.authenticate(account: account)
         }
-        let controller = WebViewControllerFactory.controller(configuration: configuration)
-        let navController = UINavigationController(rootViewController: controller)
+        let controller = WebViewControllerFactory.controller(configuration: configuration, source: "reader_visit_site")
+        let navController = LightNavigationController(rootViewController: controller)
         origin.present(navController, animated: true)
+        WPAnalytics.trackReader(.readerArticleVisited)
     }
 }

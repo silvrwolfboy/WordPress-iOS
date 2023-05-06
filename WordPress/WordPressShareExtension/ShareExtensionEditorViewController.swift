@@ -12,7 +12,7 @@ class ShareExtensionEditorViewController: ShareExtensionAbstractViewController {
     /// Cancel Bar Button
     ///
     fileprivate lazy var cancelButton: UIBarButtonItem = {
-        let cancelTitle = NSLocalizedString("Cancel", comment: "Cancel action on share extension editor screen.")
+        let cancelTitle = AppLocalizedString("Cancel", comment: "Cancel action on share extension editor screen.")
         let button = UIBarButtonItem(title: cancelTitle, style: .plain, target: self, action: #selector(cancelWasPressed))
         button.accessibilityIdentifier = "Cancel Button"
         return button
@@ -21,7 +21,7 @@ class ShareExtensionEditorViewController: ShareExtensionAbstractViewController {
     /// Next Bar Button
     ///
     fileprivate lazy var nextButton: UIBarButtonItem = {
-        let nextButtonTitle = NSLocalizedString("Next", comment: "Next action on share extension editor screen.")
+        let nextButtonTitle = AppLocalizedString("Next", comment: "Next action on share extension editor screen.")
         let button = UIBarButtonItem(title: nextButtonTitle, style: .plain, target: self, action: #selector(nextWasPressed))
         button.accessibilityIdentifier = "Next Button"
         return button
@@ -48,7 +48,7 @@ class ShareExtensionEditorViewController: ShareExtensionAbstractViewController {
 
         textView.load(WordPressPlugin())
 
-        let accessibilityLabel = NSLocalizedString("Rich Content", comment: "Post Rich content")
+        let accessibilityLabel = AppLocalizedString("Rich Content", comment: "Post Rich content")
         self.configureDefaultProperties(for: textView, accessibilityLabel: accessibilityLabel)
 
         let linkAttributes: [NSAttributedString.Key: Any] = [.underlineStyle: NSUnderlineStyle.single.rawValue,
@@ -76,7 +76,7 @@ class ShareExtensionEditorViewController: ShareExtensionAbstractViewController {
     ///
     fileprivate(set) lazy var placeholderLabel: UILabel = {
         let label = UILabel()
-        label.text = NSLocalizedString("Share your story here...", comment: "Share Extension Content Body Text Placeholder")
+        label.text = AppLocalizedString("Share your story here...", comment: "Share Extension Content Body Text Placeholder")
         label.textColor = ShareColors.placeholder
         label.font = ShareFonts.regular
         label.isUserInteractionEnabled = false
@@ -98,7 +98,7 @@ class ShareExtensionEditorViewController: ShareExtensionAbstractViewController {
 
         let textView = UITextView()
 
-        textView.accessibilityLabel = NSLocalizedString("Title", comment: "Post title")
+        textView.accessibilityLabel = AppLocalizedString("Title", comment: "Post title")
         textView.delegate = self
         textView.font = ShareFonts.title
         textView.returnKeyType = .next
@@ -117,7 +117,7 @@ class ShareExtensionEditorViewController: ShareExtensionAbstractViewController {
     /// Placeholder Label
     ///
     fileprivate(set) lazy var titlePlaceholderLabel: UILabel = {
-        let placeholderText = NSLocalizedString("Title", comment: "Placeholder for the post title.")
+        let placeholderText = AppLocalizedString("Title", comment: "Placeholder for the post title.")
         let titlePlaceholderLabel = UILabel()
 
         let attributes: [NSAttributedString.Key: Any] = [.foregroundColor: ShareColors.title, .font: ShareFonts.title]
@@ -472,7 +472,7 @@ class ShareExtensionEditorViewController: ShareExtensionAbstractViewController {
         toolbar.selectedTintColor = ShareColors.aztecFormatBarActiveColor
         toolbar.disabledTintColor = ShareColors.aztecFormatBarDisabledColor
         toolbar.dividerTintColor = ShareColors.aztecFormatBarDividerColor
-        toolbar.overflowToggleIcon = Gridicon.iconOfType(.ellipsis)
+        toolbar.overflowToggleIcon = .gridicon(.ellipsis)
         toolbar.overflowToolbar(expand: false)
         updateToolbar(toolbar)
 
@@ -688,10 +688,10 @@ extension ShareExtensionEditorViewController {
     }
 
     func showLinkDialog(forURL url: URL?, title: String?, range: NSRange) {
-        let cancelTitle = NSLocalizedString("Cancel", comment: "Cancel button")
-        let removeTitle = NSLocalizedString("Remove Link", comment: "Label action for removing a link from the editor")
-        let insertTitle = NSLocalizedString("Insert Link", comment: "Label action for inserting a link on the editor")
-        let updateTitle = NSLocalizedString("Update Link", comment: "Label action for updating a link on the editor")
+        let cancelTitle = AppLocalizedString("Cancel", comment: "Cancel button")
+        let removeTitle = AppLocalizedString("Remove Link", comment: "Label action for removing a link from the editor")
+        let insertTitle = AppLocalizedString("Insert Link", comment: "Label action for inserting a link on the editor")
+        let updateTitle = AppLocalizedString("Update Link", comment: "Label action for updating a link on the editor")
 
         let isInsertingNewLink = (url == nil)
         var urlToUse = url
@@ -710,7 +710,7 @@ extension ShareExtensionEditorViewController {
         // TextField: URL
         alertController.addTextField(configurationHandler: { [weak self] textField in
             textField.clearButtonMode = .always
-            textField.placeholder = NSLocalizedString("URL", comment: "URL text field placeholder")
+            textField.placeholder = AppLocalizedString("URL", comment: "URL text field placeholder")
             textField.text = urlToUse?.absoluteString
 
             textField.addTarget(self,
@@ -721,7 +721,7 @@ extension ShareExtensionEditorViewController {
         // TextField: Link Name
         alertController.addTextField(configurationHandler: { textField in
             textField.clearButtonMode = .always
-            textField.placeholder = NSLocalizedString("Link Name", comment: "Link name field placeholder")
+            textField.placeholder = AppLocalizedString("Link Name", comment: "Link name field placeholder")
             textField.isSecureTextEntry = false
             textField.autocapitalizationType = .sentences
             textField.autocorrectionType = .default
@@ -931,7 +931,7 @@ extension ShareExtensionEditorViewController {
         stopEditing()
         tracks.trackExtensionCancelled()
         cleanUpSharedContainerAndCache()
-        dismiss(animated: true, completion: self.dismissalCompletionBlock)
+        dismissalCompletionBlock?(false)
     }
 
     @objc func nextWasPressed() {
@@ -944,23 +944,39 @@ extension ShareExtensionEditorViewController {
 
     func displayActions(forAttachment attachment: MediaAttachment, position: CGPoint) {
         let mediaID = attachment.identifier
-        let title: String = NSLocalizedString("Media Options", comment: "Title for action sheet with media options.")
+        let title: String = AppLocalizedString(
+            "shareExtension.editor.attachmentActions.title",
+            value: "Media Options",
+            comment: "Title for action sheet with media options."
+        )
         let alertController = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
-        alertController.addActionWithTitle(NSLocalizedString("Dismiss", comment: "User action to dismiss media options."),
-                                           style: .cancel,
-                                           handler: { (action) in
-                                            if attachment == self.currentSelectedAttachment {
-                                                self.currentSelectedAttachment = nil
-                                                self.resetMediaAttachmentOverlay(attachment)
-                                                self.richTextView.refresh(attachment)
-                                            }
-        })
+        alertController.addActionWithTitle(
+            AppLocalizedString(
+                "shareExtension.editor.attachmentActions.dismiss",
+                value: "Dismiss",
+                comment: "User action to dismiss media options."
+            ),
+            style: .cancel,
+            handler: { (action) in
+                if attachment == self.currentSelectedAttachment {
+                    self.currentSelectedAttachment = nil
+                    self.resetMediaAttachmentOverlay(attachment)
+                    self.richTextView.refresh(attachment)
+                }
+            }
+        )
         if attachment is ImageAttachment {
-            alertController.addActionWithTitle(NSLocalizedString("Remove", comment: "User action to remove media."),
-                                               style: .destructive,
-                                               handler: { (action) in
-                                                self.richTextView.remove(attachmentID: mediaID)
-            })
+            alertController.addActionWithTitle(
+                AppLocalizedString(
+                    "shareExtension.editor.attachmentActions.remove",
+                    value: "Remove",
+                    comment: "User action to remove media."
+                ),
+                style: .destructive,
+                handler: { (action) in
+                    self.richTextView.remove(attachmentID: mediaID)
+                }
+            )
         }
 
         alertController.title = title
@@ -969,7 +985,7 @@ extension ShareExtensionEditorViewController {
         alertController.popoverPresentationController?.sourceRect = CGRect(origin: position, size: CGSize(width: 1, height: 1))
         alertController.popoverPresentationController?.permittedArrowDirections = .any
         present(alertController, animated: true, completion: { () in
-            UIMenuController.shared.setMenuVisible(false, animated: false)
+            UIMenuController.shared.hideMenu()
         })
     }
 }
@@ -1164,7 +1180,7 @@ extension ShareExtensionEditorViewController: TextViewAttachmentDelegate {
     }
 
     func textView(_ textView: TextView, placeholderFor attachment: NSTextAttachment) -> UIImage {
-        return Gridicon.iconOfType(.image, withSize: Constants.mediaPlaceholderImageSize)
+        return .gridicon(.image, size: Constants.mediaPlaceholderImageSize)
     }
 }
 
@@ -1198,7 +1214,7 @@ private extension ShareExtensionEditorViewController {
     func refreshInsets(forKeyboardFrame keyboardFrame: CGRect) {
         let referenceView: UIScrollView = richTextView
         let bottomInset = (view.frame.maxY - (keyboardFrame.minY + self.view.layoutMargins.bottom) + Constants.insetBottomPadding)
-        let scrollInsets = UIEdgeInsets(top: referenceView.scrollIndicatorInsets.top, left: 0, bottom: bottomInset, right: 0)
+        let scrollInsets = UIEdgeInsets(top: referenceView.verticalScrollIndicatorInsets.top, left: 0, bottom: bottomInset, right: 0)
         let contentInsets  = UIEdgeInsets(top: referenceView.contentInset.top, left: 0, bottom: bottomInset, right: 0)
 
         richTextView.scrollIndicatorInsets = scrollInsets
@@ -1268,7 +1284,7 @@ private extension ShareExtensionEditorViewController {
 
 fileprivate extension ShareExtensionEditorViewController {
     struct Assets {
-        static let defaultMissingImage          = Gridicon.iconOfType(.image)
+        static let defaultMissingImage          = UIImage.gridicon(.image)
     }
 
     struct Constants {

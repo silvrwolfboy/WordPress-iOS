@@ -47,30 +47,18 @@ final class MockSiteVerticalsService: SiteVerticalsService {
 
 /// Retrieves candidate Site Verticals used to create a new site.
 ///
-final class SiteCreationVerticalsService: LocalCoreDataService, SiteVerticalsService {
+final class SiteCreationVerticalsService: SiteVerticalsService {
 
     // MARK: Properties
-
-    /// A service for interacting with WordPress accounts.
-    private let accountService: AccountService
 
     /// A facade for WPCOM services.
     private let remoteService: WordPressComServiceRemote
 
-    // MARK: LocalCoreDataService
-
-    override init(managedObjectContext context: NSManagedObjectContext) {
-        self.accountService = AccountService(managedObjectContext: context)
-
-        let api: WordPressComRestApi
-        if let account = accountService.defaultWordPressComAccount() {
-            api = account.wordPressComRestV2Api
-        } else {
-            api = WordPressComRestApi.anonymousApi(userAgent: WPUserAgent.wordPress(), localeKey: WordPressComRestApi.LocaleKeyV2)
-        }
+    init(coreDataStack: CoreDataStack) {
+        let api = coreDataStack.performQuery({ context in
+            try? WPAccount.lookupDefaultWordPressComAccount(in: context)?.wordPressComRestV2Api
+        }) ?? WordPressComRestApi.anonymousApi(userAgent: WPUserAgent.wordPress(), localeKey: WordPressComRestApi.LocaleKeyV2)
         self.remoteService = WordPressComServiceRemote(wordPressComRestApi: api)
-
-        super.init(managedObjectContext: context)
     }
 
     // MARK: SiteVerticalsService
@@ -82,7 +70,7 @@ final class SiteCreationVerticalsService: LocalCoreDataService, SiteVerticalsSer
             switch result {
             case .success(let verticals):
                 guard let vertical = verticals.first else {
-                    CrashLogging.logMessage("The verticals service should always return at least 1 match for the precise term queried.", level: .error)
+                    WordPressAppDelegate.crashLogging?.logMessage("The verticals service should always return at least 1 match for the precise term queried.", level: .error)
                     completion(.failure(.serviceFailure))
                     return
                 }

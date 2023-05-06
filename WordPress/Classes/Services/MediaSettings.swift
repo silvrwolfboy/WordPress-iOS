@@ -29,7 +29,7 @@ class MediaSettings: NSObject {
             case .size3840x2160:
                 return AVAssetExportPreset3840x2160
             case .sizeOriginal:
-                return AVAssetExportPresetPassthrough
+                return AVAssetExportPresetHighestQuality
             }
         }
 
@@ -91,7 +91,7 @@ class MediaSettings: NSObject {
     }
 
     convenience override init() {
-        self.init(database: UserDefaults() as KeyValueDatabase)
+        self.init(database: UserPersistentStoreFactory.instance() as KeyValueDatabase)
     }
 
     // MARK: Public accessors

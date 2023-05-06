@@ -1,4 +1,4 @@
-import Foundation
+import UIKit
 
 /// AnimatedImageCache is an image + animated gif data cache used in
 /// CachedAnimatedImageView. It should be accessed via the `shared` singleton.
@@ -71,7 +71,7 @@ class AnimatedImageCache {
 
     func animatedImage(_ urlRequest: URLRequest,
                        placeholderImage: UIImage?,
-                       success: ((Data, UIImage?) -> Void)? ,
+                       success: ((Data, UIImage?) -> Void)?,
                        failure: ((NSError?) -> Void)? ) -> URLSessionTask? {
 
         if let cachedImageData = cachedData(url: urlRequest.url) {

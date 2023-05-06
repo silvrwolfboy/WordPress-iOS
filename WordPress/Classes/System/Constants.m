@@ -13,29 +13,21 @@ NSString *const WPMobileReaderDetailURL                             = @"https://
 NSString *const WPAutomatticMainURL                                 = @"https://automattic.com/";
 NSString *const WPAutomatticTermsOfServiceURL                       = @"https://wordpress.com/tos/";
 NSString *const WPAutomatticPrivacyURL                              = @"https://automattic.com/privacy/";
+NSString *const WPAutomatticCCPAPrivacyNoticeURL                    = @"https://automattic.com/privacy/#california-consumer-privacy-act-ccpa";
 NSString *const WPAutomatticCookiesURL                              = @"https://automattic.com/cookies/";
-NSString *const WPAutomatticAppsBlogURL                             = @"https://blog.wordpress.com";
 NSString *const WPGithubMainURL                                     = @"https://github.com/wordpress-mobile/WordPress-iOS/";
-NSString *const WPTwitterWordPressHandle                            = @"@WordPressiOS";
-NSString *const WPTwitterWordPressMobileURL                         = @"https://twitter.com/WordPressiOS";
 NSString *const WPComReferrerURL                                    = @"https://wordpress.com";
 NSString *const AutomatticDomain                                    = @"automattic.com";
 NSString *const WPComDomain                                         = @"wordpress.com";
 
-/// Notifications Constants
-///
-#ifdef DEBUG
-NSString *const  WPPushNotificationAppId                            = @"org.wordpress.appstore.dev";
-#else
-#ifdef INTERNAL_BUILD
-NSString *const   WPPushNotificationAppId                           = @"org.wordpress.internal";
-#else
-NSString *const WPPushNotificationAppId                             = @"org.wordpress.appstore";
-#endif
-#endif
 /// Keychain Constants
 ///
-#ifdef INTERNAL_BUILD
+/// Note: Multiple compiler flags are set for some builds, so conditional ordering matters.
+///
+#if defined(ALPHA_BUILD)
+NSString *const WPAppGroupName                                      = @"group.org.wordpress.alpha";
+NSString *const WPAppKeychainAccessGroup                            = @"99KV9Z6BKV.org.wordpress.alpha";
+#elif defined(INTERNAL_BUILD)
 NSString *const WPAppGroupName                                      = @"group.org.wordpress.internal";
 NSString *const WPAppKeychainAccessGroup                            = @"99KV9Z6BKV.org.wordpress.internal";
 #else
@@ -48,33 +40,6 @@ NSString *const WPAppKeychainAccessGroup                            = @"3TMU3BH3
 NSString *const WPNotificationContentExtensionKeychainServiceName   = @"NotificationContentExtension";
 NSString *const WPNotificationContentExtensionKeychainTokenKey      = @"OAuth2Token";
 NSString *const WPNotificationContentExtensionKeychainUsernameKey   = @"Username";
-
-/// Notification Service Extension Constants
-///
-NSString *const WPNotificationServiceExtensionKeychainServiceName   = @"NotificationServiceExtension";
-NSString *const WPNotificationServiceExtensionKeychainTokenKey      = @"OAuth2Token";
-NSString *const WPNotificationServiceExtensionKeychainUsernameKey   = @"Username";
-
-/// Share Extension Constants
-///
-NSString *const WPShareExtensionKeychainUsernameKey                 = @"Username";
-NSString *const WPShareExtensionKeychainTokenKey                    = @"OAuth2Token";
-NSString *const WPShareExtensionKeychainServiceName                 = @"ShareExtension";
-NSString *const WPShareExtensionUserDefaultsPrimarySiteName         = @"WPShareUserDefaultsPrimarySiteName";
-NSString *const WPShareExtensionUserDefaultsPrimarySiteID           = @"WPShareUserDefaultsPrimarySiteID";
-NSString *const WPShareExtensionUserDefaultsLastUsedSiteName        = @"WPShareUserDefaultsLastUsedSiteName";
-NSString *const WPShareExtensionUserDefaultsLastUsedSiteID          = @"WPShareUserDefaultsLastUsedSiteID";
-NSString *const WPShareExtensionMaximumMediaDimensionKey            = @"WPShareExtensionMaximumMediaDimensionKey";
-NSString *const WPShareExtensionRecentSitesKey                      = @"WPShareExtensionRecentSitesKey";
-
-/// Today Widget Constants
-///
-NSString *const WPStatsTodayWidgetKeychainTokenKey                  = @"OAuth2Token";
-NSString *const WPStatsTodayWidgetKeychainServiceName               = @"TodayWidget";
-NSString *const WPStatsTodayWidgetUserDefaultsSiteIdKey             = @"WordPressTodayWidgetSiteId";
-NSString *const WPStatsTodayWidgetUserDefaultsSiteNameKey           = @"WordPressTodayWidgetSiteName";
-NSString *const WPStatsTodayWidgetUserDefaultsSiteUrlKey            = @"WordPressTodayWidgetSiteUrl";
-NSString *const WPStatsTodayWidgetUserDefaultsSiteTimeZoneKey       = @"WordPressTodayWidgetTimeZone";
 
 /// Apple ID Constants
 ///

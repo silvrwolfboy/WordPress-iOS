@@ -1,8 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <CoreData/CoreData.h>
 #import <XCTest/XCTest.h>
-#import "ALIterativeMigrator.h"
 #import "Blog.h"
+#import "AbstractPost.h"
 
 @interface CoreDataMigrationTests : XCTestCase
 
@@ -30,42 +30,6 @@
     NSURL *url = [self urlForModelName:@"WordPress 20" inDirectory:nil];
     
     XCTAssertNotNil(url);
-}
-
-- (void)testMigrate19to21Failure
-{
-    NSURL *model19Url = [self urlForModelName:@"WordPress 19" inDirectory:nil];
-    NSURL *model21Url = [self urlForModelName:@"WordPress 21" inDirectory:nil];
-    NSURL *storeUrl = [self urlForStoreWithName:@"WordPress20.sqlite"];
-    NSManagedObjectModel *model = [[NSManagedObjectModel alloc] initWithContentsOfURL:model19Url];
-    NSPersistentStoreCoordinator *psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model];
-    
-    NSDictionary *options = @{
-                              NSInferMappingModelAutomaticallyOption            : @(YES),
-                              NSMigratePersistentStoresAutomaticallyOption    : @(YES)
-                              };
-    
-    NSError *error = nil;
-    NSPersistentStore * ps = [psc addPersistentStoreWithType:NSSQLiteStoreType
-                                    configuration:nil
-                                              URL:storeUrl
-                                          options:options
-                                            error:&error];
-    
-    XCTAssertNotNil(ps);
-    //make sure we remove the persistent store to make sure it releases the file.
-    [psc removePersistentStore:ps error:&error];
-    
-    psc = nil;
-    model = [[NSManagedObjectModel alloc] initWithContentsOfURL:model21Url];
-    psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model];
-    NSPersistentStore * psFail = [psc addPersistentStoreWithType:NSSQLiteStoreType
-                               configuration:nil
-                                         URL:storeUrl
-                                     options:options
-                                       error:&error];
-    
-    XCTAssertNil(psFail);
 }
 
 - (void)testMigrate19to21Success {
@@ -96,15 +60,17 @@
     psc = nil;
     
     model = [[NSManagedObjectModel alloc] initWithContentsOfURL:model21Url];
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model
-                                                orderedModelNames:@[@"WordPress 18", @"WordPress 19", @"WordPress 20", @"WordPress 21"]
-                                                            error:&error];
-    if (!migrateResult) {
+
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model
+                                                         using:@[@"WordPress 18", @"WordPress 19", @"WordPress 20", @"WordPress 21"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-    XCTAssertTrue(migrateResult);
+    XCTAssertNil(error);
     
     psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model];
     ps = [psc addPersistentStoreWithType:NSSQLiteStoreType
@@ -180,16 +146,17 @@
     // Migrate to Model 31.
     model = [[NSManagedObjectModel alloc] initWithContentsOfURL:model31Url];
     [self cleanModelObjectClassnames:model];
-    
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model
-                                                orderedModelNames:@[@"WordPress 19", @"WordPress 20", @"WordPress 21", @"WordPress 22", @"WordPress 23", @"WordPress 24", @"WordPress 25", @"WordPress 26", @"WordPress 27", @"WordPress 28", @"WordPress 29", @"WordPress 30", @"WordPress 31"]
-                                                            error:&error];
-    if (!migrateResult) {
+
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model
+                                                         using:@[@"WordPress 19", @"WordPress 20", @"WordPress 21", @"WordPress 22", @"WordPress 23", @"WordPress 24", @"WordPress 25", @"WordPress 26", @"WordPress 27", @"WordPress 28", @"WordPress 29", @"WordPress 30", @"WordPress 31"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-    XCTAssertTrue(migrateResult);
+    XCTAssertNil(error);
 
 
     // Load Model 31 after migrating
@@ -280,16 +247,17 @@
     // Migrate to Model 28
     NSManagedObjectModel *model28 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model28Url];
     [self cleanModelObjectClassnames:model28];
-    
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model28
-                                                orderedModelNames:@[@"WordPress 27", @"WordPress 28"]
-                                                            error:&error];
-    if (!migrateResult) {
+
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model28
+                                                         using:@[@"WordPress 27", @"WordPress 28"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-    XCTAssertTrue(migrateResult);
+    XCTAssertNil(error);
     
     // Load a Model 28 Stack
     psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model28];
@@ -390,15 +358,17 @@
 
     // Migrate to Model 33
     NSManagedObjectModel *model33 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model33Url];
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model33
-                                                orderedModelNames:@[@"WordPress 32", @"WordPress 33"]
-                                                            error:&error];
-    if (!migrateResult) {
+
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model33
+                                                         using:@[@"WordPress 32", @"WordPress 33"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-    XCTAssertTrue(migrateResult);
+    XCTAssertNil(error);
 
     // Load a Model 33 Stack
     psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model33];
@@ -491,15 +461,16 @@
     psc = nil;
     
     // Migrate to Model 36
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model36
-                                                orderedModelNames:@[@"WordPress 35", @"WordPress 36"]
-                                                            error:&error];
-    if (!migrateResult) {
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model36
+                                                         using:@[@"WordPress 35", @"WordPress 36"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-    XCTAssertTrue(migrateResult);
+    XCTAssertNil(error);
     
     // Load a Model 36 Stack
     psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model36];
@@ -563,17 +534,17 @@
     
     // Migrate to Model 41
     NSManagedObjectModel *model41 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model41Url];
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model41
-                                                orderedModelNames:@[@"WordPress 40", @"WordPress 41"]
-                                                            error:&error];
-    if (!migrateResult) {
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model41
+                                                         using:@[@"WordPress 40", @"WordPress 41"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-    
-    XCTAssertTrue(migrateResult);
-    
+    XCTAssertNil(error);
+
     // Load a Model 41 Stack
     NSPersistentStoreCoordinator *psc41 = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model41];
     [psc41 addPersistentStoreWithType:NSSQLiteStoreType configuration:nil URL:storeUrl options:options error:&error];
@@ -686,16 +657,16 @@
     psc = nil;
     
     // Migrate to Model 42
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model42
-                                                orderedModelNames:@[@"WordPress 41", @"WordPress 42"]
-                                                            error:&error];
-    if (!migrateResult) {
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model42
+                                                         using:@[@"WordPress 41", @"WordPress 42"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-
-    XCTAssertTrue(migrateResult);
+    XCTAssertNil(error);
     
     // Load a Model 42 Stack
     psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model42];
@@ -794,16 +765,16 @@
     psc = nil;
 
     // Migrate to Model 49
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model49
-                                                orderedModelNames:@[@"WordPress 48", @"WordPress 49"]
-                                                            error:&error];
-    if (!migrateResult) {
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model49
+                                                         using:@[@"WordPress 48", @"WordPress 49"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-
-    XCTAssertTrue(migrateResult);
+    XCTAssertNil(error);
 
     // Load a Model 42 Stack
     psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model49];
@@ -869,16 +840,16 @@
 
     // Migrate to Model 53
     NSManagedObjectModel *model53 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model53Url];
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model53
-                                                orderedModelNames:@[@"WordPress 52", @"WordPress 53"]
-                                                            error:&error];
-    if (!migrateResult) {
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model53
+                                                         using:@[@"WordPress 52", @"WordPress 53"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-
-    XCTAssertTrue(migrateResult);
+    XCTAssertNil(error);
 
     // Load a Model 53 Stack
     NSPersistentStoreCoordinator *psc53 = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model53];
@@ -948,15 +919,16 @@
 
     // Migrate to Model 75
     NSManagedObjectModel *model75 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model75Url];
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model75
-                                                orderedModelNames:@[@"WordPress 74", @"WordPress 75"]
-                                                            error:&error];
-    if (!migrateResult) {
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model75
+                                                         using:@[@"WordPress 74", @"WordPress 75"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-    XCTAssertTrue(migrateResult);
+    XCTAssertNil(error);
 
     // Load a Model 75 Stack
     psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model75];
@@ -1026,15 +998,16 @@
 
     // Migrate to Model 88
     NSManagedObjectModel *model88 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model88Url];
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model88
-                                                orderedModelNames:@[@"WordPress 87", @"WordPress 88"]
-                                                            error:&error];
-    if (!migrateResult) {
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model88
+                                                         using:@[@"WordPress 87", @"WordPress 88"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
-    XCTAssertTrue(migrateResult);
+    XCTAssertNil(error);
 
     // Load a Model 88 Stack
     psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model88];
@@ -1134,16 +1107,16 @@
     // Act
     // Migrate to Model 92
     NSManagedObjectModel *model92 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model92Url];
-    BOOL migrateResult = [ALIterativeMigrator iterativeMigrateURL:storeUrl
-                                                           ofType:NSSQLiteStoreType
-                                                          toModel:model92
-                                                orderedModelNames:@[@"WordPress 91", @"WordPress 92"]
-                                                            error:&error];
-    if (!migrateResult) {
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model92
+                                                         using:@[@"WordPress 91", @"WordPress 92"]
+                                                         error:&error];
+
+    if (error != nil) {
         NSLog(@"Error while migrating: %@", error);
     }
     XCTAssertNil(error);
-    XCTAssertTrue(migrateResult);
 
     // Load a Model 92 Stack
     psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model92];
@@ -1180,6 +1153,183 @@
     XCTAssertEqual(blog3Posts.count, 1);
     XCTAssertNil([blog3Posts.anyObject valueForKey:@"status"]);
     XCTAssertNil([blog3Posts.anyObject valueForKey:@"statusAfterSync"]);
+}
+
+/// In model 104, we updated transformables to use the NSSecureUnarchiveFromData transformer type.
+/// Here we'll check that they're still accessible after a migration. Most of our transformable properties
+/// are arrays or dictionaries, so we'll test a couple of representative examples.
+///
+- (void)testMigrationFrom103To104Transformables
+{
+    // Arrange
+    NSURL *model103Url = [self urlForModelName:@"WordPress 103" inDirectory:nil];
+    NSURL *model104Url = [self urlForModelName:@"WordPress 104" inDirectory:nil];
+    NSURL *storeUrl = [self urlForStoreWithName:@"WordPress103.sqlite"];
+
+    // Load a Model 103 Stack
+    NSManagedObjectModel *model103 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model103Url];
+    NSPersistentStoreCoordinator *psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model103];
+
+    NSDictionary *options = @{
+        NSInferMappingModelAutomaticallyOption       : @(YES),
+        NSMigratePersistentStoresAutomaticallyOption : @(YES)
+    };
+
+    NSError *error = nil;
+    NSPersistentStore *ps = [psc addPersistentStoreWithType:NSSQLiteStoreType
+                                              configuration:nil
+                                                        URL:storeUrl
+                                                    options:options
+                                                      error:&error];
+    XCTAssertNil(error, @"Error while loading the PSC for Model 103");
+    XCTAssertNotNil(ps);
+
+    NSManagedObjectContext *context = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
+    context.persistentStoreCoordinator = psc;
+    XCTAssertNotNil(context, @"Invalid NSManagedObjectContext");
+
+    // Create a dictionary-backed transformable
+    NSNumber *blog1ID = @(987);
+    Blog *blog1 = (Blog *)[self insertDummyBlogInContext:context blogID:blog1ID];
+    NSDictionary *blogOptions = @{
+        @"allowed_file_types": @[
+                @"pdf", @"xls", @"jpg"
+        ]
+    };
+    blog1.options = blogOptions;
+
+    // Create an array-backed transformable
+    AbstractPost *post1 = (AbstractPost *)[self insertDummyPostInContext:context blog:blog1];
+    NSArray *revisions = @[ @123, @124 ];
+    post1.revisions = revisions;
+
+    [context save:&error];
+    XCTAssertNil(error, @"Error while saving context");
+
+    psc = nil;
+
+    // Migrate to Model 104
+    NSManagedObjectModel *model104 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model104Url];
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model104
+                                                         using:@[@"WordPress 103", @"WordPress 104"]
+                                                         error:&error];
+
+    if (error != nil) {
+        NSLog(@"Error while migrating: %@", error);
+    }
+    XCTAssertNil(error);
+
+    // Load a Model 104 Stack
+    psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model104];
+    ps = [psc addPersistentStoreWithType:NSSQLiteStoreType
+                           configuration:nil
+                                     URL:storeUrl
+                                 options:options
+                                   error:&error];
+
+    context = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
+    context.persistentStoreCoordinator = psc;
+
+    // Check that our properties persisted
+    Blog *fetchedBlog1 = [context fetch:@"Blog" withPredicate:@"blogID = %i" arguments:@[blog1ID]].firstObject;
+    XCTAssertNotNil(fetchedBlog1);
+
+    NSSet<AbstractPost *> *blog1Posts = [fetchedBlog1 valueForKey:@"posts"];
+    XCTAssertEqual(blog1Posts.count, 1);
+    XCTAssertTrue([fetchedBlog1.options isEqualToDictionary:blogOptions]);
+
+    AbstractPost *fetchedPost1 = [blog1Posts anyObject];
+    XCTAssertTrue([fetchedPost1.revisions isEqualToArray:revisions]);
+}
+
+/// In model 104, we updated some transformables to use custom Transformer subclasses.
+/// Here we'll check that they're still accessible after a migration.
+///
+- (void)testMigrationFrom103To104CustomTransformers
+{
+    // Arrange
+    NSURL *model103Url = [self urlForModelName:@"WordPress 103" inDirectory:nil];
+    NSURL *model104Url = [self urlForModelName:@"WordPress 104" inDirectory:nil];
+    NSURL *storeUrl = [self urlForStoreWithName:@"WordPress103-1.sqlite"];
+
+    // Load a Model 103 Stack
+    NSManagedObjectModel *model103 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model103Url];
+    NSPersistentStoreCoordinator *psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model103];
+
+    NSDictionary *options = @{
+        NSInferMappingModelAutomaticallyOption       : @(YES),
+        NSMigratePersistentStoresAutomaticallyOption : @(YES)
+    };
+
+    NSError *error = nil;
+    NSPersistentStore *ps = [psc addPersistentStoreWithType:NSSQLiteStoreType
+                                              configuration:nil
+                                                        URL:storeUrl
+                                                    options:options
+                                                      error:&error];
+    XCTAssertNil(error, @"Error while loading the PSC for Model 103");
+    XCTAssertNotNil(ps);
+
+    NSManagedObjectContext *context = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
+    context.persistentStoreCoordinator = psc;
+    XCTAssertNotNil(context, @"Invalid NSManagedObjectContext");
+
+    Blog *blog1 = (Blog *)[self insertDummyBlogInContext:context blogID:@123];
+
+    // BlogSettings uses Set transformers
+    BlogSettings *settings1 = (BlogSettings *)[NSEntityDescription insertNewObjectForEntityForName:[BlogSettings entityName] inManagedObjectContext:context];
+    settings1.commentsModerationKeys = [NSSet setWithArray:@[ @"purple", @"monkey", @"dishwasher" ]];
+    blog1.settings = settings1;
+
+    // Media has an Error transformer
+    Media *media1 = (Media *)[NSEntityDescription insertNewObjectForEntityForName:[Media entityName] inManagedObjectContext:context];
+    media1.blog = blog1;
+    // The UserInfo dictionary of an NSError can contain types that can't be securely coded, which will throw a Core Data exception on save.
+    // We attach an NSUnderlyingError with the expectation that it won't be included when the error is encoded and persisted.
+    NSError *underlyingError = [NSError errorWithDomain:NSURLErrorDomain code:500 userInfo:nil];
+    NSError *error1 = [NSError errorWithDomain:NSURLErrorDomain code:100 userInfo:@{ NSLocalizedDescriptionKey: @"test", NSUnderlyingErrorKey: underlyingError }];
+    media1.error = error1;
+
+    [context save:&error];
+    XCTAssertNil(error, @"Error while saving context");
+
+    psc = nil;
+
+    // Migrate to Model 104
+    NSManagedObjectModel *model104 = [[NSManagedObjectModel alloc] initWithContentsOfURL:model104Url];
+    [CoreDataIterativeMigrator iterativeMigrateWithSourceStore:storeUrl
+                                                     storeType:NSSQLiteStoreType
+                                                            to:model104
+                                                         using:@[@"WordPress 103", @"WordPress 104"]
+                                                         error:&error];
+
+    if (error != nil) {
+        NSLog(@"Error while migrating: %@", error);
+    }
+    XCTAssertNil(error);
+
+    // Load a Model 104 Stack
+    psc = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model104];
+    ps = [psc addPersistentStoreWithType:NSSQLiteStoreType
+                           configuration:nil
+                                     URL:storeUrl
+                                 options:options
+                                   error:&error];
+
+    context = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
+    context.persistentStoreCoordinator = psc;
+
+    // Check that our properties persisted
+    Media *fetchedMedia1 = [context fetch:@"Media" withPredicate:nil arguments:nil].firstObject;
+    // The expected error is stripped of any keys not included in the Media.error setter
+    NSError *expectedError = [NSError errorWithDomain:NSURLErrorDomain code:100 userInfo:@{ NSLocalizedDescriptionKey: @"test" }];
+    XCTAssert([fetchedMedia1.error isEqual:expectedError]);
+
+    Blog *fetchedBlog1 = [context fetch:@"Blog" withPredicate:@"blogID = %i" arguments:@[@123]].firstObject;
+    XCTAssertNotNil(fetchedBlog1);
+    XCTAssertTrue([fetchedBlog1.settings.commentsModerationKeys isEqualToSet:settings1.commentsModerationKeys]);
 }
 
 #pragma mark - Private Helpers
@@ -1221,7 +1371,6 @@
     
     return storeURL;
 }
-
 
 - (NSManagedObject *)insertDummyBlogInContext:(NSManagedObjectContext *)context
 {
@@ -1341,7 +1490,10 @@
 - (NSArray *)fetch:(NSString *)entityName withPredicate:(NSString *)predicate arguments:(NSArray *)arguments
 {
     NSFetchRequest *request = [NSFetchRequest fetchRequestWithEntityName:entityName];
-    request.predicate = [NSPredicate predicateWithFormat:predicate argumentArray:arguments];
+
+    if (predicate && arguments) {
+        request.predicate = [NSPredicate predicateWithFormat:predicate argumentArray:arguments];
+    }
 
     NSError *error = nil;
     NSArray *result = [self executeFetchRequest:request error:&error];

@@ -55,9 +55,9 @@ extension WPStyleGuide {
 
     class func applyRestorePostButtonStyle(_ button: UIButton) {
         configureLabelForRegularFontStyle(button.titleLabel)
-        button.setTitleColor(.accent, for: .normal)
-        button.setTitleColor(.accentDark, for: .highlighted)
-        button.tintColor = .accent
+        button.setTitleColor(.primary, for: .normal)
+        button.setTitleColor(.primaryDark, for: .highlighted)
+        button.tintColor = .primary
     }
 
     class func applyBorderStyle(_ view: UIView) {
@@ -111,18 +111,19 @@ extension WPStyleGuide {
 
     static var navigationBarButtonRect = CGRect(x: 0, y: 0, width: 30, height: 30)
 
-    static var spacingBetweeenNavbarButtons: CGFloat = 40
+    static var spacingBetweenNavbarButtons: CGFloat = 40
 
     class func buttonForBar(with image: UIImage,
                             target: Any?, selector: Selector) -> WPButtonForNavigationBar {
         let button = WPButtonForNavigationBar(frame: navigationBarButtonRect)
-        button.tintColor = .white
+        button.tintColor = .appBarTint
+
         button.setImage(image, for: .normal)
         button.addTarget(target, action: selector, for: .touchUpInside)
         button.removeDefaultLeftSpacing = true
         button.removeDefaultRightSpacing = true
-        button.rightSpacing = spacingBetweeenNavbarButtons / 2
-        button.leftSpacing = spacingBetweeenNavbarButtons / 2
+        button.rightSpacing = spacingBetweenNavbarButtons / 2
+        button.leftSpacing = spacingBetweenNavbarButtons / 2
         return button
     }
 

@@ -17,14 +17,6 @@ final class SearchTextField: UITextField {
         static let textInset        = CGFloat(56)
     }
 
-    // MARK: Becoming First Responder
-
-    var allowFirstResponderStatus: Bool = true
-
-    override var canBecomeFirstResponder: Bool {
-        return allowFirstResponderStatus
-    }
-
     // MARK: UIView
 
     init() {
@@ -55,12 +47,19 @@ final class SearchTextField: UITextField {
     override func rightViewRect(forBounds bounds: CGRect) -> CGRect {
         let iconX = bounds.width - Constants.iconInset - Constants.iconDimension
         let iconY = (bounds.height - Constants.iconDimension) / 2
-        return CGRect(x: iconX, y: iconY, width: Constants.iconDimension, height: bounds.height)
+        return CGRect(x: iconX, y: iconY, width: Constants.iconDimension, height: Constants.iconDimension)
     }
 
     override func clearButtonRect(forBounds bounds: CGRect) -> CGRect {
         let originalClearButtonRect = super.clearButtonRect(forBounds: bounds)
-        return originalClearButtonRect.offsetBy(dx: Constants.clearButtonInset, dy: 0)
+
+        var offsetX = Constants.clearButtonInset
+
+        if effectiveUserInterfaceLayoutDirection == .rightToLeft {
+            offsetX = -offsetX
+        }
+
+        return originalClearButtonRect.offsetBy(dx: offsetX, dy: 0)
     }
 
     // MARK: Private behavior
@@ -77,36 +76,40 @@ final class SearchTextField: UITextField {
         autocorrectionType = .no
         adjustsFontForContentSizeCategory = true
 
-        setIconImage()
+        setIconImage(view: searchIconImageView)
 
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Constants.searchHeight),
             ])
-
-        addTopBorder(withColor: .divider)
-        addBottomBorder(withColor: .divider)
     }
 
-    private func setIconImage() {
+    private lazy var searchIconImageView: UIImageView = {
         let iconSize = CGSize(width: Constants.iconDimension, height: Constants.iconDimension)
-        let loupeIcon = Gridicon.iconOfType(.search, withSize: iconSize).imageWithTintColor(.listIcon)?.imageFlippedForRightToLeftLayoutDirection()
-        let imageView = UIImageView(image: loupeIcon)
+        let loupeIcon = UIImage.gridicon(.search, size: iconSize).imageWithTintColor(.listIcon)
+        return UIImageView(image: loupeIcon)
+    }()
 
-        if traitCollection.layoutDirection == .rightToLeft {
-            rightView = imageView
-            rightViewMode = .always
+    private lazy var activityIndicator: UIActivityIndicatorView = {
+        let activityIndicator = UIActivityIndicatorView(style: .medium)
+        activityIndicator.backgroundColor = UIColor.clear
+
+        return activityIndicator
+    }()
+
+    func setIcon(isLoading: Bool) {
+        if isLoading {
+            setIconImage(view: activityIndicator)
+            activityIndicator.startAnimating()
         } else {
-            leftView = imageView
-            leftViewMode = .always
+            activityIndicator.stopAnimating()
+            setIconImage(view: searchIconImageView)
         }
     }
 
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-
-        if #available(iOS 13, *) {
-            setIconImage()
-        }
+    private func setIconImage(view: UIView) {
+        // Since the RTL layout is already handled elsewhere updating leftView is enough here
+        leftView = view
+        leftViewMode = .always
     }
 }
 

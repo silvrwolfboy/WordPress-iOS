@@ -43,8 +43,8 @@ class RestorePostTableViewCell: UITableViewCell, ConfigurablePostView, Interacti
         restoreLabel.text = NSLocalizedString("Post moved to trash.", comment: "A short message explaining that a post was moved to the trash bin.")
         let buttonTitle = NSLocalizedString("Undo", comment: "The title of an 'undo' button. Tapping the button moves a trashed post out of the trash folder.")
         restoreButton.setTitle(buttonTitle, for: .normal)
-        restoreButton.setImage(Gridicon.iconOfType(.undo, withSize: CGSize(width: Constants.imageSize,
-                                                                           height: Constants.imageSize)), for: .normal)
+        restoreButton.setImage(.gridicon(.undo, size: CGSize(width: Constants.imageSize,
+                                                             height: Constants.imageSize)), for: .normal)
     }
 
     private func configureCompact() {
@@ -74,6 +74,10 @@ class RestorePostTableViewCell: UITableViewCell, ConfigurablePostView, Interacti
 
     func setInteractionDelegate(_ delegate: InteractivePostViewDelegate) {
         self.delegate = delegate
+    }
+
+    func setActionSheetDelegate(_ delegate: PostActionSheetDelegate) {
+        // Do nothing, since this cell doesn't have an action to present an action sheet.
     }
 
     private enum Constants {

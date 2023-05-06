@@ -1,12 +1,12 @@
 import UIKit
 
-class PostingActivityCell: UITableViewCell, NibLoadable, Accessible {
+class PostingActivityCell: StatsBaseCell, NibLoadable, Accessible {
 
     // MARK: - Properties
 
     @IBOutlet weak var monthsStackView: UIStackView!
     @IBOutlet weak var viewMoreLabel: UILabel!
-    @IBOutlet weak var legendView: UIView!
+    @IBOutlet weak var legendView: UIStackView!
 
     @IBOutlet weak var topSeparatorLine: UIView!
     @IBOutlet weak var bottomSeparatorLine: UIView!
@@ -28,6 +28,7 @@ class PostingActivityCell: UITableViewCell, NibLoadable, Accessible {
 
     func configure(withData monthsData: [[PostingStreakEvent]], andDelegate delegate: SiteStatsInsightsDelegate?) {
         siteStatsInsightsDelegate = delegate
+        statSection = .insightsPostingActivity
         addMonths(monthsData: monthsData)
     }
 
@@ -39,11 +40,12 @@ class PostingActivityCell: UITableViewCell, NibLoadable, Accessible {
     func prepareForVoiceOver() {
         viewMoreButton.accessibilityLabel =
             NSLocalizedString("View more", comment: "Accessibility label for viewing more posting activity.")
+        viewMoreButton.accessibilityHint = NSLocalizedString("Tap to view more details.", comment: "Accessibility hint for a button that opens a new view with more details.")
     }
 
     override var accessibilityElements: [Any]? {
         get {
-            monthsStackView.arrangedSubviews + [viewMoreButton].compactMap { $0 }
+            [headingLabel] + monthsStackView.arrangedSubviews + [viewMoreButton].compactMap { $0 }
         }
         set { }
     }
@@ -64,7 +66,7 @@ private extension PostingActivityCell {
 
     func addLegend() {
         let legend = PostingActivityLegend.loadFromNib()
-        legendView.addSubview(legend)
+        legendView.addArrangedSubview(legend)
     }
 
     func addMonths(monthsData: [[PostingStreakEvent]]) {

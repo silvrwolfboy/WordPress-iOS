@@ -6,16 +6,16 @@ import Gridicons
 //
 @objc public protocol ReplyTextViewDelegate: UITextViewDelegate {
     @objc optional func textView(_ textView: UITextView, didTypeWord word: String)
+
+    @objc optional func replyTextView(_ replyTextView: ReplyTextView, willEnterFullScreen controller: FullScreenCommentReplyViewController)
+
+    @objc optional func replyTextView(_ replyTextView: ReplyTextView, didExitFullScreen lastSearchText: String?)
 }
 
 
 // MARK: - ReplyTextView
 //
 @objc open class ReplyTextView: UIView, UITextViewDelegate {
-    private struct AnimationParameters {
-        static let focusTransitionTime = TimeInterval(0.3)
-        static let stateTransitionTime = TimeInterval(0.2)
-    }
 
     // MARK: - Initializers
     @objc public convenience init(width: CGFloat) {
@@ -107,7 +107,6 @@ import Gridicons
 
     open func textViewDidBeginEditing(_ textView: UITextView) {
         delegate?.textViewDidBeginEditing?(textView)
-        transitionReplyButton()
     }
 
     open func textViewShouldEndEditing(_ textView: UITextView) -> Bool {
@@ -116,7 +115,6 @@ import Gridicons
 
     open func textViewDidEndEditing(_ textView: UITextView) {
         delegate?.textViewDidEndEditing?(textView)
-        transitionReplyButton()
     }
 
     open func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
@@ -175,22 +173,24 @@ import Gridicons
     }
 
     @IBAction fileprivate func btnEnterFullscreenPressed(_ sender: Any) {
-        guard let editViewController = FullScreenCommentReplyViewController.newEdit() else {
-            return
-        }
+        let rootViewController = RootViewCoordinator.sharedPresenter.rootViewController
 
-        guard let presenter = WPTabBarController.sharedInstance() else {
-            return
+        let editViewController = FullScreenCommentReplyViewController()
+
+        // Inform any listeners
+        let respondsToWillEnter = delegate?.responds(to: #selector(ReplyTextViewDelegate.replyTextView(_:willEnterFullScreen:))) ?? false
+
+        if respondsToWillEnter {
+            delegate?.replyTextView?(self, willEnterFullScreen: editViewController)
         }
 
         // Snapshot the first reponder status before presenting so we can restore it later
         let didHaveFirstResponder = textView.isFirstResponder
 
         editViewController.content = textView.text
-        if #available(iOS 13.0, *) {
-            editViewController.isModalInPresentation = true
-        }
-        editViewController.onExitFullscreen = { (shouldSave, updatedContent) in
+        editViewController.placeholder = placeholder
+        editViewController.isModalInPresentation = true
+        editViewController.onExitFullscreen = { (shouldSave, updatedContent, lastSearchText) in
             self.text = updatedContent
 
             // If the user was editing before they entered fullscreen, then restore that state
@@ -207,14 +207,20 @@ import Gridicons
                 self.btnReplyPressed()
             }
 
-            //Dimiss the fullscreen view, once it has fully closed process the saving if needed
-            presenter.dismiss(animated: true)
+            // Dismiss the fullscreen view, once it has fully closed process the saving if needed
+            rootViewController.dismiss(animated: true) {
+                let respondsToDidExit = self.delegate?.responds(to: #selector(ReplyTextViewDelegate.replyTextView(_:didExitFullScreen:))) ?? false
+
+                if respondsToDidExit {
+                    self.delegate?.replyTextView?(self, didExitFullScreen: lastSearchText)
+                }
+            }
         }
 
         self.resignFirstResponder()
 
         let navController = LightNavigationController(rootViewController: editViewController)
-        presenter.present(navController, animated: true)
+        rootViewController.present(navController, animated: true)
     }
 
     // MARK: - Gestures Recognizers
@@ -262,55 +268,38 @@ import Gridicons
         contentView.translatesAutoresizingMaskIntoConstraints = false
         pinSubviewToAllEdges(contentView)
 
-        // Setup the TextView
+        // TextView
         textView.delegate = self
         textView.scrollsToTop = false
         textView.contentInset = .zero
         textView.textContainerInset = .zero
-        textView.backgroundColor = WPStyleGuide.Reply.textViewBackground
-        textView.font = WPStyleGuide.Reply.textFont
-        textView.textColor = WPStyleGuide.Reply.textColor
+        textView.autocorrectionType = .yes
+        textView.textColor = Style.textColor
         textView.textContainer.lineFragmentPadding = 0
         textView.layoutManager.allowsNonContiguousLayout = false
         textView.accessibilityIdentifier = "ReplyText"
 
-        // Enable QuickType
-        textView.autocorrectionType = .yes
-
         // Placeholder
-        placeholderLabel.font = WPStyleGuide.Reply.textFont
-        placeholderLabel.textColor = WPStyleGuide.Reply.placeholderColor
+        placeholderLabel.textColor = Style.placeholderColor
 
         // Fullscreen toggle button
-        let fullscreenImage = Gridicon.iconOfType(.chevronUp)
-        fullscreenToggleButton.setImage(fullscreenImage, for: .normal)
+        fullscreenToggleButton.setImage(.gridicon(.chevronUp), for: .normal)
         fullscreenToggleButton.tintColor = .listIcon
         fullscreenToggleButton.accessibilityLabel = NSLocalizedString("Enter Full Screen",
                                                                       comment: "Accessibility Label for the enter full screen button on the comment reply text view")
 
-
-        // Reply
-        let replyIcon = UIImage(named: "icon-comment-reply")
-        replyButton.setImage(replyIcon?.imageWithTintColor(WPStyleGuide.Reply.enabledColor), for: .normal)
-        replyButton.setImage(replyIcon?.imageWithTintColor(WPStyleGuide.Reply.disabledColor), for: .disabled)
-
-        replyButton.isEnabled = false
+        // Reply button
+        replyButton.setTitleColor(Style.replyButtonColor, for: .normal)
+        replyButton.titleLabel?.text = NSLocalizedString("Reply", comment: "Reply to a comment.")
         replyButton.accessibilityLabel = NSLocalizedString("Reply", comment: "Accessibility label for the reply button")
-
-        transitionReplyButton(animated: false)
+        refreshReplyButton()
 
         // Background
-        contentView.backgroundColor = WPStyleGuide.Reply.backgroundColor
-        bezierContainerView.outerColor = WPStyleGuide.Reply.backgroundColor
+        contentView.backgroundColor = Style.backgroundColor
 
-        // Bezier
-        bezierContainerView.bezierColor = WPStyleGuide.Reply.backgroundColor
-        bezierContainerView.bezierFillColor = WPStyleGuide.Reply.textViewBackground
-        bezierContainerView.translatesAutoresizingMaskIntoConstraints = false
-
-        // Separators
-        separatorsView.topColor = WPStyleGuide.Reply.separatorColor
-        separatorsView.topVisible = true
+        // Top Separator
+        topSeparator.backgroundColor = Style.separatorColor
+        topSeparatorHeightConstraint.constant = .hairlineBorderWidth
 
         // Recognizers
         let recognizer = UITapGestureRecognizer(target: self, action: #selector(ReplyTextView.backgroundWasTapped))
@@ -324,7 +313,7 @@ import Gridicons
     // MARK: - Refresh Helpers
     fileprivate func refreshInterface() {
         refreshPlaceholder()
-        enableRefreshButtonIfNeeded()
+        refreshReplyButton()
         refreshSizeIfNeeded()
         refreshScrollPosition()
     }
@@ -344,20 +333,8 @@ import Gridicons
         placeholderLabel.isHidden = !textView.text.isEmpty
     }
 
-    private func enableRefreshButtonIfNeeded() {
-        let whitespaceCharSet = CharacterSet.whitespacesAndNewlines
-        let isEnabled = self.textView.text.trimmingCharacters(in: whitespaceCharSet).isEmpty == false
-
-        if isEnabled == self.replyButton.isEnabled {
-            return
-        }
-
-        UIView.transition(with: replyButton as UIView,
-                          duration: AnimationParameters.stateTransitionTime,
-                          options: .transitionCrossDissolve,
-                          animations: {
-            self.replyButton.isEnabled = isEnabled
-        })
+    private func refreshReplyButton() {
+        replyButtonView.isHidden = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     fileprivate func refreshScrollPosition() {
@@ -367,37 +344,22 @@ import Gridicons
         textView.scrollRectToVisible(caretRect, animated: false)
     }
 
-    fileprivate func transitionReplyButton(animated: Bool = true) {
-        replyButtonTrailingConstraint.constant = isFirstResponder ? 0.0 : -(frame.width * 2)
-
-        let updateFrame = {
-            self.layoutIfNeeded()
-        }
-
-        if animated {
-            UIView.animate(withDuration: AnimationParameters.focusTransitionTime) {
-                updateFrame()
-            }
-        }
-        else {
-            updateFrame()
-        }
-    }
-
     // MARK: - Private Properties
     fileprivate var bundle: NSArray?
+    private typealias Style = WPStyleGuide.Reply
 
     // MARK: - IBOutlets
-    @IBOutlet private var textView: UITextView!
-    @IBOutlet private var placeholderLabel: UILabel!
-    @IBOutlet private var replyButton: UIButton!
-    @IBOutlet private var bezierContainerView: ReplyBezierView!
-    @IBOutlet private var separatorsView: SeparatorsView!
-    @IBOutlet private var contentView: UIView!
-    @IBOutlet private var bezierTopConstraint: NSLayoutConstraint!
-    @IBOutlet private var bezierBottomConstraint: NSLayoutConstraint!
-    @IBOutlet private weak var replyButtonTrailingConstraint: NSLayoutConstraint!
-    @IBOutlet weak var fullscreenToggleButton: UIButton!
+    @IBOutlet private weak var contentView: UIView!
+    @IBOutlet private weak var topSeparator: UIView!
+    @IBOutlet private weak var topSeparatorHeightConstraint: NSLayoutConstraint!
+    @IBOutlet private weak var stackViewTopConstraint: NSLayoutConstraint!
+    @IBOutlet private weak var stackViewBottomConstraint: NSLayoutConstraint!
+    @IBOutlet private weak var fullscreenToggleButton: UIButton!
+    @IBOutlet private weak var textContainerView: UIView!
+    @IBOutlet private weak var textView: UITextView!
+    @IBOutlet private weak var placeholderLabel: UILabel!
+    @IBOutlet private weak var replyButtonView: UIView!
+    @IBOutlet private weak var replyButton: UIButton!
 }
 
 
@@ -405,11 +367,10 @@ import Gridicons
 //
 private extension ReplyTextView {
 
-    /// Padding: Bezier Margins (Top / Bottom) + Bezier Constraints (Top / Bottom)
+    /// Padding
     ///
     var contentPadding: CGFloat {
-        return bezierContainerView.layoutMargins.top + bezierContainerView.layoutMargins.bottom
-                + bezierTopConstraint.constant + bezierBottomConstraint.constant
+        return stackViewTopConstraint.constant + stackViewBottomConstraint.constant
     }
 
     /// Returns the Content Height (non capped).
